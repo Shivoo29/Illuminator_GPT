@@ -1,0 +1,61 @@
+#Core Framework
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+python-multipart
+
+#LLM & Embeddings
+llama-cpp-python
+sentence-transformers
+langchain
+langchain-community
+chromadb
+
+#Document Processing
+PyMuPDF
+python-docx
+python-pptx
+reportlab
+Pillow
+pypdf
+
+#Video/Audio Processing
+opencv-python-headless
+faster-whisper
+moviepy
+pydub
+
+#OCR
+pytesseract
+easyocr
+
+#Translation (offline)
+transformers
+sentencepiece
+torch
+
+#Image Generation
+diffusers
+onnxruntime
+accelerate
+
+#NLP
+language-tool-python
+spacy
+
+#Data Analysis
+pandas
+matplotlib
+plotly
+openpyxl
+numpy
+
+#Utilities
+aiofiles
+python-magic
+tqdm
+requests
+httpx
+psutil
+aiohttp
