@@ -55,7 +55,7 @@ DEFAULT_MODELS: List[ModelInfo] = [
         parameters="7B",
     ),
     ModelInfo(
-        name="llama3.2-3b",
+        name="llama3.2-3b"
         display_name=
         size_gb=
         description=
