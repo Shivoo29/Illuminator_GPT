@@ -33,7 +33,7 @@ class AppState:
 
     def _check_setup_complete(self) -> bool:
         '''Check if first-time setuo has been completed'''
-        setup_marker = settingd.data_dir / ".setup_complete"
+        setup_marker = settings.data_dir / ".setup_complete"
         return setup_marker.exists()
 
     async def _initialize_components(self):
