@@ -1,6 +1,25 @@
 import { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
-import { api } from "../utils/api.ts";
+import { api } from "../utils/api";
+import { useTheme } from "../contexts/ThemeContext";
+import {
+  Settings as SettingsIcon,
+  Bot,
+  Puzzle,
+  HardDrive,
+  Activity,
+  Info,
+  Loader2,
+  Sun,
+  Moon,
+  AlertTriangle,
+  Mic,
+  Palette,
+  Globe,
+  Download,
+  Cpu,
+  MemoryStick,
+  Monitor,
+} from "lucide-react";
 
 interface ModelInfo {
   name: string;
@@ -30,12 +49,21 @@ interface StorageInfo {
   };
 }
 
+interface PerformanceStats {
+  cpu: { percent: number; cores: number };
+  memory: { total_gb: number; used_gb: number; available_gb: number; percent: number };
+  gpu: { utilization_percent: number; memory_used_mb: number; memory_total_mb: number } | null;
+}
+
 export default function Settings() {
+  const { theme, toggleTheme } = useTheme();
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [features, setFeatures] = useState<Record<string, FeatureStatus>>({});
   const [storage, setStorage] = useState<StorageInfo | null>(null);
+  const [performance, setPerformance] = useState<PerformanceStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [clearingCache, setClearingCache] = useState(false);
+  const [resetting, setResetting] = useState(false);
 
   useEffect(() => {
     loadSettings();
@@ -43,15 +71,16 @@ export default function Settings() {
 
   const loadSettings = async () => {
     try {
-      const [modelsData, featuresData, storageData] = await Promise.all([
+      const [modelsData, featuresData, storageData, perfData] = await Promise.all([
         api.get<{ installed: ModelInfo[] }>("/setup/available_models"),
         api.get<Record<string, FeatureStatus>>("/setup/feature_status"),
         api.get<StorageInfo>("/system/storage"),
+        api.get<PerformanceStats>("/system/performance").catch(() => null),
       ]);
-
       setModels(modelsData.installed || []);
       setFeatures(featuresData);
       setStorage(storageData);
+      if (perfData) setPerformance(perfData);
     } catch (error) {
       console.error("Failed to load settings:", error);
     } finally {
@@ -71,196 +100,259 @@ export default function Settings() {
     }
   };
 
+  const resetApp = async () => {
+    if (!confirm("This will delete ALL documents, vectors, and settings. Are you sure?")) return;
+    setResetting(true);
+    try {
+      await api.post("/system/reset?confirm=true", null);
+      window.location.reload();
+    } catch (error) {
+      console.error("Failed to reset:", error);
+      setResetting(false);
+    }
+  };
+
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+      <div className="flex-1 flex items-center justify-center">
+        <Loader2 className="w-6 h-6 animate-spin" style={{ color: "var(--color-accent-primary)" }} />
       </div>
     );
   }
 
+  const storageSegments = storage ? [
+    { label: "Models", gb: storage.breakdown.models.gb, color: "#6366f1" },
+    { label: "Vectors", gb: storage.breakdown.vector_database.gb, color: "#8b5cf6" },
+    { label: "Documents", gb: storage.breakdown.documents.gb, color: "#a78bfa" },
+    { label: "Cache", gb: storage.breakdown.cache.gb, color: "#c4b5fd" },
+    { label: "Outputs", gb: storage.breakdown.outputs.gb, color: "#ddd6fe" },
+  ] : [];
+
   return (
-    <div className="min-h-screen bg-gray-100">
+    <div className="flex-1 flex flex-col overflow-hidden">
       {/* Header */}
-      <header className="bg-white shadow-sm">
-        <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center">
-            <Link
-              to="/"
-              className="text-gray-600 hover:text-gray-800 mr-4"
-            >
-              ← Back
-            </Link>
-            <h1 className="text-xl font-bold text-gray-800">Settings</h1>
-          </div>
-        </div>
-      </header>
+      <div className="h-14 flex items-center px-6 border-b shrink-0" style={{ borderColor: "var(--color-border-primary)" }}>
+        <SettingsIcon className="w-5 h-5 mr-2" style={{ color: "var(--color-accent-primary)" }} />
+        <h2 className="text-sm font-semibold" style={{ color: "var(--color-text-primary)" }}>Settings</h2>
+      </div>
 
-      <main className="max-w-4xl mx-auto px-4 py-8 space-y-8">
-        {/* Language Models */}
-        <section className="bg-white rounded-xl shadow-sm p-6">
-          <h2 className="text-lg font-semibold text-gray-800 mb-4">
-            🤖 Language Models
-          </h2>
+      <div className="flex-1 overflow-y-auto p-6">
+        <div className="max-w-2xl mx-auto space-y-6">
 
-          <div className="space-y-3">
-            {models.length > 0 ? (
-              models.map((model) => (
+          {/* Appearance */}
+          <section className="rounded-xl border p-5" style={{ borderColor: "var(--color-border-primary)", background: "var(--color-bg-surface)" }}>
+            <div className="flex items-center gap-2 mb-4">
+              {theme === "dark" ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
+              <h3 className="text-sm font-semibold" style={{ color: "var(--color-text-primary)" }}>Appearance</h3>
+            </div>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium" style={{ color: "var(--color-text-primary)" }}>Theme</p>
+                <p className="text-xs" style={{ color: "var(--color-text-tertiary)" }}>
+                  Currently using {theme} mode
+                </p>
+              </div>
+              <button
+                onClick={toggleTheme}
+                className="relative w-12 h-7 rounded-full transition-all duration-300 cursor-pointer"
+                style={{ background: theme === "dark" ? "linear-gradient(135deg, #6366f1, #8b5cf6)" : "var(--color-bg-tertiary)" }}
+              >
                 <div
-                  key={model.name}
-                  className="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
+                  className="absolute top-1 w-5 h-5 rounded-full bg-white transition-all duration-300 flex items-center justify-center"
+                  style={{ left: theme === "dark" ? "calc(100% - 24px)" : "4px" }}
                 >
-                  <div>
-                    <p className="font-medium text-gray-800">{model.name}</p>
-                    <p className="text-sm text-gray-500">
-                      {model.size_gb} GB • {model.type.toUpperCase()}
-                    </p>
-                  </div>
-                  <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm">
-                    Active
-                  </span>
+                  {theme === "dark" ? <Moon className="w-3 h-3 text-indigo-600" /> : <Sun className="w-3 h-3 text-amber-500" />}
                 </div>
-              ))
-            ) : (
-              <p className="text-gray-500">No models installed</p>
-            )}
-          </div>
-
-          <button className="mt-4 px-4 py-2 text-primary-600 hover:text-primary-700 font-medium">
-            + Download New Model
-          </button>
-        </section>
-
-        {/* Features */}
-        <section className="bg-white rounded-xl shadow-sm p-6">
-          <h2 className="text-lg font-semibold text-gray-800 mb-4">
-            🎯 Features
-          </h2>
-
-          <div className="space-y-3">
-            <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-              <div>
-                <p className="font-medium text-gray-800">🎙️ Podcast Generation</p>
-                <p className="text-sm text-gray-500">
-                  Generate audio discussions ({features.tts?.size_gb || 0.1} GB)
-                </p>
-              </div>
-              <span
-                className={`px-3 py-1 rounded-full text-sm ${
-                  features.tts?.installed
-                    ? "bg-green-100 text-green-700"
-                    : "bg-gray-100 text-gray-600"
-                }`}
-              >
-                {features.tts?.installed ? "Installed" : "Not Installed"}
-              </span>
+              </button>
             </div>
+          </section>
 
-            <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-              <div>
-                <p className="font-medium text-gray-800">🎨 Image Generation</p>
-                <p className="text-sm text-gray-500">
-                  Create images from text ({features.image_generation?.size_gb || 2.0} GB)
-                </p>
-              </div>
-              <span
-                className={`px-3 py-1 rounded-full text-sm ${
-                  features.image_generation?.installed
-                    ? "bg-green-100 text-green-700"
-                    : "bg-gray-100 text-gray-600"
-                }`}
-              >
-                {features.image_generation?.installed ? "Installed" : "Not Installed"}
-              </span>
+          {/* Models */}
+          <section className="rounded-xl border p-5" style={{ borderColor: "var(--color-border-primary)", background: "var(--color-bg-surface)" }}>
+            <div className="flex items-center gap-2 mb-4">
+              <Bot className="w-4 h-4" style={{ color: "var(--color-accent-primary)" }} />
+              <h3 className="text-sm font-semibold" style={{ color: "var(--color-text-primary)" }}>Language Models</h3>
             </div>
-
-            <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-              <div>
-                <p className="font-medium text-gray-800">🌐 Translation</p>
-                <p className="text-sm text-gray-500">
-                  Translate between languages ({features.translation?.size_gb || 1.5} GB)
-                </p>
-              </div>
-              <span
-                className={`px-3 py-1 rounded-full text-sm ${
-                  features.translation?.installed
-                    ? "bg-green-100 text-green-700"
-                    : "bg-gray-100 text-gray-600"
-                }`}
-              >
-                {features.translation?.installed ? "Installed" : "Not Installed"}
-              </span>
+            <div className="space-y-2">
+              {models.length > 0 ? (
+                models.map((model) => (
+                  <div key={model.name} className="flex items-center justify-between p-3.5 rounded-xl" style={{ background: "var(--color-bg-tertiary)" }}>
+                    <div>
+                      <p className="text-sm font-medium" style={{ color: "var(--color-text-primary)" }}>{model.name}</p>
+                      <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>{model.size_gb} GB · {model.type?.toUpperCase()}</p>
+                    </div>
+                    <span className="px-2.5 py-1 rounded-full text-[10px] font-bold" style={{ background: "var(--color-success-bg)", color: "var(--color-success)" }}>
+                      ACTIVE
+                    </span>
+                  </div>
+                ))
+              ) : (
+                <p className="text-sm" style={{ color: "var(--color-text-muted)" }}>No models installed</p>
+              )}
             </div>
-          </div>
-        </section>
-
-        {/* Storage */}
-        {storage && (
-          <section className="bg-white rounded-xl shadow-sm p-6">
-            <h2 className="text-lg font-semibold text-gray-800 mb-4">
-              💾 Storage
-            </h2>
-
-            <div className="mb-4">
-              <div className="flex justify-between text-sm mb-1">
-                <span className="text-gray-600">
-                  Used: {storage.total_used_gb} GB
-                </span>
-                <span className="text-gray-600">
-                  Free: {storage.disk.free_gb} GB
-                </span>
-              </div>
-              <div className="h-3 bg-gray-200 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-primary-600"
-                  style={{ width: `${storage.disk.used_percent}%` }}
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              <div className="p-3 bg-gray-50 rounded-lg">
-                <p className="text-gray-500">Models</p>
-                <p className="font-medium">{storage.breakdown.models.gb} GB</p>
-              </div>
-              <div className="p-3 bg-gray-50 rounded-lg">
-                <p className="text-gray-500">Vector Database</p>
-                <p className="font-medium">{storage.breakdown.vector_database.gb} GB</p>
-              </div>
-              <div className="p-3 bg-gray-50 rounded-lg">
-                <p className="text-gray-500">Documents</p>
-                <p className="font-medium">{storage.breakdown.documents.gb} GB</p>
-              </div>
-              <div className="p-3 bg-gray-50 rounded-lg">
-                <p className="text-gray-500">Cache</p>
-                <p className="font-medium">{storage.breakdown.cache.gb} GB</p>
-              </div>
-            </div>
-
-            <button
-              onClick={clearCache}
-              disabled={clearingCache}
-              className="mt-4 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50"
-            >
-              {clearingCache ? "Clearing..." : "Clear Cache"}
+            <button className="mt-3 text-xs font-semibold flex items-center gap-1.5 cursor-pointer" style={{ color: "var(--color-accent-primary)" }}>
+              <Download className="w-3.5 h-3.5" /> Download New Model
             </button>
           </section>
-        )}
 
-        {/* About */}
-        <section className="bg-white rounded-xl shadow-sm p-6">
-          <h2 className="text-lg font-semibold text-gray-800 mb-4">
-            ℹ️ About
-          </h2>
-          <div className="space-y-2 text-sm text-gray-600">
-            <p><strong>Offline RAG Assistant</strong> v1.0.0</p>
-            <p>A fully offline, privacy-focused document assistant.</p>
-            <p className="pt-2">
-              All processing happens locally on your device. No data is sent to external servers.
+          {/* Features */}
+          <section className="rounded-xl border p-5" style={{ borderColor: "var(--color-border-primary)", background: "var(--color-bg-surface)" }}>
+            <div className="flex items-center gap-2 mb-4">
+              <Puzzle className="w-4 h-4" style={{ color: "var(--color-accent-primary)" }} />
+              <h3 className="text-sm font-semibold" style={{ color: "var(--color-text-primary)" }}>Features</h3>
+            </div>
+            <div className="space-y-2">
+              {[
+                { key: "tts", icon: Mic, label: "Podcast Generation", size: "0.1" },
+                { key: "image_generation", icon: Palette, label: "Image Generation", size: "2.0" },
+                { key: "translation", icon: Globe, label: "Translation", size: "1.5" },
+              ].map((feature) => (
+                <div key={feature.key} className="flex items-center justify-between p-3.5 rounded-xl" style={{ background: "var(--color-bg-tertiary)" }}>
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{
+                      background: features[feature.key]?.installed ? "var(--color-success-bg)" : "var(--color-bg-hover)"
+                    }}>
+                      <feature.icon className="w-4 h-4" style={{
+                        color: features[feature.key]?.installed ? "var(--color-success)" : "var(--color-text-muted)"
+                      }} />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium" style={{ color: "var(--color-text-primary)" }}>{feature.label}</p>
+                      <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>{feature.size} GB</p>
+                    </div>
+                  </div>
+                  <span
+                    className="px-2.5 py-1 rounded-full text-[10px] font-bold"
+                    style={{
+                      background: features[feature.key]?.installed ? "var(--color-success-bg)" : "var(--color-bg-hover)",
+                      color: features[feature.key]?.installed ? "var(--color-success)" : "var(--color-text-muted)",
+                    }}
+                  >
+                    {features[feature.key]?.installed ? "INSTALLED" : "NOT INSTALLED"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {/* Storage */}
+          {storage && (
+            <section className="rounded-xl border p-5" style={{ borderColor: "var(--color-border-primary)", background: "var(--color-bg-surface)" }}>
+              <div className="flex items-center gap-2 mb-4">
+                <HardDrive className="w-4 h-4" style={{ color: "var(--color-accent-primary)" }} />
+                <h3 className="text-sm font-semibold" style={{ color: "var(--color-text-primary)" }}>Storage</h3>
+              </div>
+
+              {/* Totals */}
+              <div className="flex justify-between text-xs mb-2">
+                <span style={{ color: "var(--color-text-secondary)" }}>Used: {storage.total_used_gb} GB</span>
+                <span style={{ color: "var(--color-text-muted)" }}>Free: {storage.disk.free_gb} GB</span>
+              </div>
+
+              {/* Segmented bar */}
+              <div className="h-2.5 rounded-full overflow-hidden flex mb-4" style={{ background: "var(--color-bg-tertiary)" }}>
+                {storageSegments.map((seg) =>
+                  seg.gb > 0 ? (
+                    <div
+                      key={seg.label}
+                      className="h-full transition-all"
+                      style={{
+                        width: `${Math.max((seg.gb / storage.disk.total_gb) * 100, 1)}%`,
+                        background: seg.color,
+                      }}
+                    />
+                  ) : null
+                )}
+              </div>
+
+              {/* Breakdown grid */}
+              <div className="grid grid-cols-3 gap-2">
+                {storageSegments.map((seg) => (
+                  <div key={seg.label} className="flex items-center gap-2 text-xs">
+                    <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: seg.color }} />
+                    <span style={{ color: "var(--color-text-tertiary)" }}>{seg.label}</span>
+                    <span className="font-medium" style={{ color: "var(--color-text-primary)" }}>{seg.gb} GB</span>
+                  </div>
+                ))}
+              </div>
+
+              <button
+                onClick={clearCache}
+                disabled={clearingCache}
+                className="mt-4 px-4 py-2 rounded-xl text-xs font-medium border transition-colors disabled:opacity-50 cursor-pointer"
+                style={{
+                  borderColor: "var(--color-border-primary)",
+                  color: "var(--color-text-secondary)",
+                  background: "var(--color-bg-tertiary)",
+                }}
+              >
+                {clearingCache ? "Clearing..." : "Clear Cache"}
+              </button>
+            </section>
+          )}
+
+          {/* Performance */}
+          {performance && (
+            <section className="rounded-xl border p-5" style={{ borderColor: "var(--color-border-primary)", background: "var(--color-bg-surface)" }}>
+              <div className="flex items-center gap-2 mb-4">
+                <Activity className="w-4 h-4" style={{ color: "var(--color-accent-primary)" }} />
+                <h3 className="text-sm font-semibold" style={{ color: "var(--color-text-primary)" }}>Performance</h3>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  { icon: Cpu, label: "CPU", value: `${performance.cpu.percent}%`, sub: `${performance.cpu.cores} cores` },
+                  { icon: MemoryStick, label: "RAM", value: `${performance.memory.percent}%`, sub: `${performance.memory.used_gb}/${performance.memory.total_gb} GB` },
+                  ...(performance.gpu ? [{
+                    icon: Monitor, label: "GPU", value: `${performance.gpu.utilization_percent}%`, sub: `${performance.gpu.memory_used_mb}/${performance.gpu.memory_total_mb} MB`
+                  }] : []),
+                ].map((stat) => (
+                  <div key={stat.label} className="p-3.5 rounded-xl" style={{ background: "var(--color-bg-tertiary)" }}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <stat.icon className="w-4 h-4" style={{ color: "var(--color-text-muted)" }} />
+                      <span className="text-xs font-medium" style={{ color: "var(--color-text-tertiary)" }}>{stat.label}</span>
+                    </div>
+                    <p className="text-lg font-bold" style={{ color: "var(--color-text-primary)" }}>{stat.value}</p>
+                    <p className="text-[10px]" style={{ color: "var(--color-text-muted)" }}>{stat.sub}</p>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* About */}
+          <section className="rounded-xl border p-5" style={{ borderColor: "var(--color-border-primary)", background: "var(--color-bg-surface)" }}>
+            <div className="flex items-center gap-2 mb-4">
+              <Info className="w-4 h-4" style={{ color: "var(--color-accent-primary)" }} />
+              <h3 className="text-sm font-semibold" style={{ color: "var(--color-text-primary)" }}>About</h3>
+            </div>
+            <div className="space-y-1.5 text-sm" style={{ color: "var(--color-text-secondary)" }}>
+              <p><strong style={{ color: "var(--color-text-primary)" }}>Illuminator GPT</strong> v1.0.0</p>
+              <p>A fully offline, privacy-focused AI document assistant.</p>
+              <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>All processing happens locally. No data leaves your device.</p>
+            </div>
+          </section>
+
+          {/* Danger zone */}
+          <section className="rounded-xl border p-5" style={{ borderColor: "var(--color-error)", background: "var(--color-error-bg)" }}>
+            <div className="flex items-center gap-2 mb-3">
+              <AlertTriangle className="w-4 h-4" style={{ color: "var(--color-error)" }} />
+              <h3 className="text-sm font-semibold" style={{ color: "var(--color-error)" }}>Danger Zone</h3>
+            </div>
+            <p className="text-xs mb-3" style={{ color: "var(--color-text-secondary)" }}>
+              Reset will delete all documents, vectors, and settings.
             </p>
-          </div>
-        </section>
-      </main>
+            <button
+              onClick={resetApp}
+              disabled={resetting}
+              className="px-4 py-2 rounded-xl text-xs font-semibold text-white transition-all hover:opacity-90 disabled:opacity-50 cursor-pointer"
+              style={{ background: "var(--color-error)" }}
+            >
+              {resetting ? "Resetting..." : "Reset Application"}
+            </button>
+          </section>
+
+        </div>
+      </div>
     </div>
   );
 }
