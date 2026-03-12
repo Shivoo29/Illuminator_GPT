@@ -20,6 +20,12 @@ import {
   PanelRightClose,
 } from "lucide-react";
 
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
+
 interface Message {
   id: string;
   role: "user" | "assistant";
@@ -242,9 +248,20 @@ export default function MainApp() {
                         : {}
                     }
                   >
-                    <p className="text-sm whitespace-pre-wrap leading-relaxed" style={message.role === "assistant" ? { color: "var(--color-text-primary)" } : {}}>
-                      {message.content}
-                    </p>
+                    {message.role === "assistant" ? (
+                      <div className="markdown-prose">
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm, remarkMath]}
+                          rehypePlugins={[rehypeKatex]}
+                        >
+                          {message.content}
+                        </ReactMarkdown>
+                      </div>
+                    ) : (
+                      <p className="text-sm whitespace-pre-wrap leading-relaxed text-white">
+                        {message.content}
+                      </p>
+                    )}
 
                     {/* Sources */}
                     {message.sources && message.sources.length > 0 && (
