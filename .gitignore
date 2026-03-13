@@ -1,4 +1,5 @@
 venv
+.venv
 data
 models
 backend/app/services/__pycache__

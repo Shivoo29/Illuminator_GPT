@@ -77,26 +77,27 @@ class AppState:
         '''Get LLM manager, initializing if needed.'''
         if self.llm_manager is None:
             from app.services.llm_manager import LLMManager
-            self.llm_manager.initialize()
+            self.llm_manager = LLMManager()
+            await self.llm_manager.initialize()
         return self.llm_manager
 
     async def get_podcast_generator(self):
         # Get podcast generator, initializing if needed.
         if self.podcast_generator is None:
             from app.services.podcast_generator import PodcastGenerator
-            self.podcast_generator = PodcastGenerator(await self.get_llm_manager)
+            self.podcast_generator = PodcastGenerator(await self.get_llm_manager())
         return self.podcast_generator
     
     async def get_translator(self):
         # Get translator, initializing if needed.
         if self.translator is None:
             from app.services.translator import OfflineTranslator
-            self.translation = OfflineTranslator()
+            self.translator = OfflineTranslator()
         return self.translator
 
     def mark_setup_complete(self):
         # Mark setup as complete.
-        setup_marker = setting.data_dir / ".setup_complete"
+        setup_marker = settings.data_dir / ".setup_complete"
         setup_marker.touch()
         self.setup_complete = True
 

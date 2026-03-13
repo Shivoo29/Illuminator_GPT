@@ -33,7 +33,8 @@ class LLMManager:
         self.use_ollama: bool = False
         self.ollama_client: Optional[httpx.AsyncClient] = None
         self._initialized = False
-    async def initialized(self) -> bool:
+
+    async def initialize(self) -> bool:
         if await self._check_ollama():
             self.use_ollama = True
             self.ollama_client = httpx.AsyncClient(
@@ -101,7 +102,7 @@ class LLMManager:
             self.model_name = model_path.stem
 
         except Exception as e:
-            raise RecursionError(f"Failed to load model:{e}")
+            raise RuntimeError(f"Failed to load model:{e}")
         
     def _has_gpu(self) -> bool:
         # check for gpu, whether it is availabel or not?
@@ -129,7 +130,7 @@ class LLMManager:
         if self.use_ollama:
             return await self._generate_ollama(prompt, config)
         else:
-            return await self._generate_locale(prompt, config)
+            return await self._generate_local(prompt, config)
         
     async def _generate_ollama(
         self,
@@ -169,21 +170,21 @@ class LLMManager:
                 max_tokens=config.max_tokens,
                 temperature = config.temperature,
                 top_p = config.top_p,
-                top_K = config.top_k,
+                top_k = config.top_k,
                 repeat_penalty = config.repeat_penalty,
                 stop=config.stop,
             )
         )
         return result["choices"][0]["text"]
     
-    async def genetate_stream(
+    async def generate_stream(
             self,
             prompt:str,
             config: Optional[GenerationConfig]= None,
     ) -> AsyncGenerator[str,None]:
         """Generate text with streaming output"""
         if not self._initialized:
-            raise RuntimeError("lawden Bhoujyum") # LLM not initialized
+            raise RuntimeError("LLM not initialized")
         config = config or GenerationConfig()
         if self.use_ollama:
             async for chunk in self._stream_ollama(prompt, config):
@@ -235,7 +236,7 @@ class LLMManager:
                 temperature = config.temperature,
                 top_p = config.top_p,
                 top_k = config.top_k,
-                repeat_penalty = config.repat_penalty,
+                repeat_penalty = config.repeat_penalty,
                 stop= config.stop,
                 stream = True,
             ):
