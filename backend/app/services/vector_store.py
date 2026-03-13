@@ -138,16 +138,16 @@ class VectorStoreManager:
 
         # Convert to SearchResult objects
         search_results = []
-        if results and results["ids"] and results["ids"][0]:
+        if results and results.get("ids") and results["ids"][0]:
             for i, doc_id in enumerate(results["ids"][0]):
                 # Convert distance to similarity score (1 - distance for cosine)
-                distance = results["distances"][0][i] if results["distances"] else 0
+                distance = results["distances"][0][i] if results.get("distances") is not None else 0
                 score = 1 - distance
 
                 search_results.append(SearchResult(
                     id=doc_id,
-                    content=results["documents"][0][i] if results["documents"] else "",
-                    metadata=results["metadatas"][0][i] if results["metadatas"] else {},
+                    content=results["documents"][0][i] if results.get("documents") is not None else "",
+                    metadata=results["metadatas"][0][i] if results.get("metadatas") is not None else {},
                     score=score,
                 ))
 
@@ -169,12 +169,12 @@ class VectorStoreManager:
 
         results = await loop.run_in_executor(None, get)
 
-        if results and results["ids"]:
+        if results and results.get("ids"):
             return Document(
                 id=results["ids"][0],
-                content=results["documents"][0] if results["documents"] else "",
-                metadata=results["metadatas"][0] if results["metadatas"] else {},
-                embedding=results["embeddings"][0] if results["embeddings"] else None,
+                content=results["documents"][0] if results.get("documents") is not None else "",
+                metadata=results["metadatas"][0] if results.get("metadatas") is not None else {},
+                embedding=results["embeddings"][0] if results.get("embeddings") is not None else None,
             )
 
         return None
