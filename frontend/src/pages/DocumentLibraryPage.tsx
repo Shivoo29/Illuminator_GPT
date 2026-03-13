@@ -4,7 +4,6 @@ import {
   FileText,
   Loader2,
   Trash2,
-  AlertTriangle,
   FolderOpen,
 } from "lucide-react"
 

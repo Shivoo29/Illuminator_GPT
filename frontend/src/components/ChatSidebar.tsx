@@ -1,4 +1,4 @@
-import { Plus, MessageSquare, Trash2, Edit2, Check, X, MoreVertical } from "lucide-react";
+import { Plus, MessageSquare, Trash2, Edit2, Check, X } from "lucide-react";
 import { useState } from "react";
 
 interface Chat {
