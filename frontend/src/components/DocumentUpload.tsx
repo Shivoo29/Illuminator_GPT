@@ -13,6 +13,7 @@ import {
 
 interface DocumentUploadProps {
   onComplete: () => void;
+  chatId?: string | null;
 }
 
 const FILE_ICONS: Record<string, typeof FileText> = {
@@ -30,7 +31,7 @@ function getFileIcon(file: File) {
   return FileText;
 }
 
-export default function DocumentUpload({ onComplete }: DocumentUploadProps) {
+export default function DocumentUpload({ onComplete, chatId }: DocumentUploadProps) {
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -71,7 +72,7 @@ export default function DocumentUpload({ onComplete }: DocumentUploadProps) {
 
     try {
       const interval = setInterval(() => setProgress((p) => Math.min(p + 10, 90)), 200);
-      await api.upload("/documents/upload", file);
+      await api.upload("/documents/upload", file, chatId ? { chat_id: chatId } : undefined);
       clearInterval(interval);
       setProgress(100);
       setComplete(true);

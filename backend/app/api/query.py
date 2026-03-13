@@ -19,6 +19,7 @@ class QueryRequest(BaseModel):
     question: str
     n_results: int = 5
     filter_document_id: Optional[str] = None
+    chat_id: Optional[str] = None
     stream: bool = False
     max_tokens: int = 2048
     temperature: float = 0.7
@@ -52,7 +53,25 @@ async def query(request: Request, body: QueryRequest):
 
     # Build filter
     filter_metadata = None
-    if body.filter_document_id:
+    chat = None
+    messages_context = []
+    
+    if body.chat_id and hasattr(app_state, "chat_manager"):
+        chat = app_state.chat_manager.get_chat(body.chat_id)
+        if chat:
+            docs = chat.get("document_ids", [])
+            messages = chat.get("messages", [])
+            # Extract recent context
+            messages_context = messages[-6:] if messages else []
+            
+            if body.filter_document_id:
+                filter_metadata = {"document_id": body.filter_document_id}
+            elif docs:
+                filter_metadata = {"document_id": {"$in": docs}}
+            else:
+                # No docs in chat context, so don't query the vectorstore (impossible filter)
+                filter_metadata = {"document_id": "NONE"}
+    elif body.filter_document_id:
         filter_metadata = {"document_id": body.filter_document_id}
 
     # Create RAG engine
@@ -72,6 +91,7 @@ async def query(request: Request, body: QueryRequest):
                 n_results=body.n_results,
                 filter_metadata=filter_metadata,
                 generation_config=config,
+                chat_history=messages_context,
             ):
                 yield json.dumps({"chunk": chunk}) + "\n"
 
@@ -86,6 +106,7 @@ async def query(request: Request, body: QueryRequest):
         n_results=body.n_results,
         filter_metadata=filter_metadata,
         generation_config=config,
+        chat_history=messages_context,
     )
 
     return {

@@ -15,6 +15,7 @@ class AppState:
         self.podcast_generator = None
         self.image_generator = None
         self.translator = None
+        self.chat_manager = None
 
 
         self.llm_ready = False
@@ -43,6 +44,9 @@ class AppState:
             from app.services.embedding_manager import EmbeddingManager
             from app.services.vector_store import VectorStoreManager
             from app.services.document_processor import DocumentProcessor
+            from app.services.chat_manager import ChatManager
+
+            self.chat_manager = ChatManager()
 
 
             # embedding manager

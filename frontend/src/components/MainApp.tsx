@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { api } from "../utils/api";
 import DocumentUpload from "./DocumentUpload";
 import PodcastGenerator from "./PodcastGenerator";
+import ChatSidebar from "./ChatSidebar";
 import {
   Send,
   Paperclip,
@@ -18,6 +19,7 @@ import {
   Mic,
   PanelRightOpen,
   PanelRightClose,
+  PlusCircle,
 } from "lucide-react";
 
 import ReactMarkdown from "react-markdown";
@@ -44,6 +46,14 @@ interface Document {
   chunk_count: number;
 }
 
+interface Chat {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+}
+
 const SUGGESTED_PROMPTS = [
   { icon: BookOpen, text: "Summarize this document" },
   { icon: Search, text: "What are the key points?" },
@@ -52,32 +62,106 @@ const SUGGESTED_PROMPTS = [
 ];
 
 export default function MainApp() {
+  // Chat state
+  const [chats, setChats] = useState<Chat[]>([]);
+  const [currentChatId, setCurrentChatId] = useState<string | null>(null);
+  
+  // Content state
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [documents, setDocuments] = useState<Document[]>([]);
-  const [selectedDocument, setSelectedDocument] = useState<string | null>(null);
+  const [allDocuments, setAllDocuments] = useState<Document[]>([]);
+  
+  // UI state
   const [showUpload, setShowUpload] = useState(false);
+  const [showDocLibrary, setShowDocLibrary] = useState(false);
   const [showPodcast, setShowPodcast] = useState(false);
-  const [docPanelOpen, setDocPanelOpen] = useState(false);
+  const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
+  const [docPanelOpen, setDocPanelOpen] = useState(true);
   const [expandedSources, setExpandedSources] = useState<Set<string>>(new Set());
+  
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // Initial load
   useEffect(() => {
-    loadDocuments();
+    loadChats();
+    loadAllDocuments();
   }, []);
 
+  // Scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const loadDocuments = async () => {
+  // Load chat content when chat id changes
+  useEffect(() => {
+    if (currentChatId) {
+      loadChatDetails(currentChatId);
+    } else {
+      setMessages([]);
+      setDocuments([]);
+    }
+  }, [currentChatId]);
+
+  const loadChats = async () => {
+    try {
+      const data = await api.get<Chat[]>("/chats");
+      setChats(data);
+    } catch (error) {
+      console.error("Failed to load chats:", error);
+    }
+  };
+
+  const loadAllDocuments = async () => {
     try {
       const docs = await api.get<Document[]>("/documents");
-      setDocuments(docs);
+      setAllDocuments(docs);
     } catch (error) {
       console.error("Failed to load documents:", error);
+    }
+  };
+
+  const loadChatDetails = async (chatId: string) => {
+    try {
+      const chat = await api.get<any>(`/chats/${chatId}`);
+      setMessages(chat.messages || []);
+      
+      // Load docs for this chat
+      const chatDocs = await api.get<Document[]>(`/documents`, { chat_id: chatId });
+      setDocuments(chatDocs);
+    } catch (error) {
+      console.error("Failed to load chat details:", error);
+    }
+  };
+
+  const handleNewChat = () => {
+    setCurrentChatId(null);
+    setMessages([]);
+    setDocuments([]);
+    setSelectedDocumentId(null);
+    if (textareaRef.current) textareaRef.current.focus();
+  };
+
+  const deleteChat = async (id: string) => {
+    try {
+      await api.delete(`/chats/${id}`);
+      if (currentChatId === id) {
+        handleNewChat();
+      }
+      loadChats();
+    } catch (error) {
+      console.error("Failed to delete chat:", error);
+    }
+  };
+
+  const renameChat = async (id: string, title: string) => {
+    try {
+      await api.put(`/chats/${id}/title`, { title });
+      loadChats();
+    } catch (error) {
+      console.error("Failed to rename chat:", error);
     }
   };
 
@@ -85,45 +169,101 @@ export default function MainApp() {
     e?.preventDefault();
     if (!input.trim() || loading) return;
 
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      role: "user",
-      content: input,
-    };
-
-    setMessages((prev) => [...prev, userMessage]);
+    let chatId = currentChatId;
+    const question = input.trim();
+    
+    // Reset textarea height
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
     setInput("");
     setLoading(true);
 
-    // Reset textarea height
-    if (textareaRef.current) textareaRef.current.style.height = "auto";
-
     try {
+      // 1. If no active chat, create one first
+      if (!chatId) {
+        const newChat = await api.post<Chat>("/chats", { first_message: question });
+        chatId = newChat.id;
+        setCurrentChatId(chatId);
+        loadChats();
+      } else {
+        // Add user message to history in backend
+        await api.post(`/chats/${chatId}/messages`, {
+          role: "user",
+          content: question
+        });
+        
+        // Update local UI
+        const userMsg: Message = { id: Date.now().toString(), role: "user", content: question };
+        setMessages(prev => [...prev, userMsg]);
+      }
+
+      // 2. Query RAG with current chat context
       const response = await api.post<{ answer: string; sources: any[] }>("/query", {
-        question: input,
-        filter_document_id: selectedDocument,
-        n_results: 5,
+        question: question,
+        chat_id: chatId,
+        filter_document_id: selectedDocumentId,
+        stream: false // Non-streaming for simplicity in this refactor
       });
 
-      const assistantMessage: Message = {
+      // 3. Save assistant message in backend
+      await api.post(`/chats/${chatId}/messages`, {
+        role: "assistant",
+        content: response.answer,
+        references: response.sources
+      });
+
+      // 4. Update local UI
+      const assistantMsg: Message = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
         content: response.answer,
-        sources: response.sources,
+        sources: response.sources
       };
+      setMessages(prev => [...prev, assistantMsg]);
 
-      setMessages((prev) => [...prev, assistantMessage]);
-    } catch {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: (Date.now() + 1).toString(),
-          role: "assistant",
-          content: "Sorry, I encountered an error. Please try again.",
-        },
-      ]);
+      // 5. Trigger auto-title if it was the first message
+      const chatData = chats.find(c => c.id === chatId);
+      if (chatData && (chatData.title === "New Chat" || messages.length === 0)) {
+        const titleData = await api.post<{title: string}>("/chats/generate_title", { content: question });
+        if (titleData.title) {
+          await api.put(`/chats/${chatId}/title`, { title: titleData.title });
+          loadChats();
+        }
+      }
+
+    } catch (error) {
+      console.error("Error in submit:", error);
+      setMessages(prev => [...prev, {
+        id: Date.now().toString(),
+        role: "assistant",
+        content: "Sorry, I encountered an error. Please try again."
+      }]);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const addDocToChat = async (docId: string) => {
+    if (!currentChatId) {
+      // Create chat first if needed
+      const newChat = await api.post<Chat>("/chats", { first_message: "Reading document..." });
+      setCurrentChatId(newChat.id);
+      await api.post(`/chats/${newChat.id}/documents`, { document_id: docId });
+      loadChats();
+    } else {
+      await api.post(`/chats/${currentChatId}/documents`, { document_id: docId });
+    }
+    loadChatDetails(currentChatId || ""); // chatId should exist now or will be updated by effect
+    setShowDocLibrary(false);
+  };
+
+  const removeDocFromChat = async (docId: string) => {
+    if (!currentChatId) return;
+    try {
+      await api.delete(`/chats/${currentChatId}/documents/${docId}`);
+      loadChatDetails(currentChatId);
+      if (selectedDocumentId === docId) setSelectedDocumentId(null);
+    } catch (error) {
+      console.error("Failed to remove document:", error);
     }
   };
 
@@ -142,16 +282,6 @@ export default function MainApp() {
     }
   };
 
-  const deleteDocument = async (docId: string) => {
-    try {
-      await api.delete(`/documents/${docId}`);
-      loadDocuments();
-      if (selectedDocument === docId) setSelectedDocument(null);
-    } catch (error) {
-      console.error("Failed to delete document:", error);
-    }
-  };
-
   const toggleSources = (messageId: string) => {
     setExpandedSources((prev) => {
       const next = new Set(prev);
@@ -167,6 +297,16 @@ export default function MainApp() {
 
   return (
     <div className="flex flex-1 h-full overflow-hidden">
+      {/* Sidebar - Chat History */}
+      <ChatSidebar 
+        chats={chats}
+        currentChatId={currentChatId}
+        onSelectChat={setCurrentChatId}
+        onNewChat={handleNewChat}
+        onDeleteChat={deleteChat}
+        onRenameChat={renameChat}
+      />
+
       {/* Main chat area */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Header */}
@@ -175,12 +315,14 @@ export default function MainApp() {
           style={{ borderColor: "var(--color-border-primary)", background: "var(--color-bg-primary)" }}
         >
           <div className="flex items-center gap-2">
-            <h2 className="text-sm font-semibold" style={{ color: "var(--color-text-primary)" }}>Chat</h2>
-            {selectedDocument && (
+            <h2 className="text-sm font-semibold" style={{ color: "var(--color-text-primary)" }}>
+              {currentChatId ? chats.find(c => c.id === currentChatId)?.title : "New Chat"}
+            </h2>
+            {selectedDocumentId && (
               <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium" style={{ background: "var(--color-accent-bg)", color: "var(--color-accent-primary)" }}>
                 <FileText className="w-3 h-3" />
-                <span className="max-w-[120px] truncate">{documents.find((d) => d.id === selectedDocument)?.filename}</span>
-                <button onClick={() => setSelectedDocument(null)} className="hover:opacity-70 cursor-pointer">
+                <span className="max-w-[120px] truncate">{documents.find((d) => d.id === selectedDocumentId)?.filename}</span>
+                <button onClick={() => setSelectedDocumentId(null)} className="hover:opacity-70 cursor-pointer">
                   <X className="w-3 h-3" />
                 </button>
               </div>
@@ -208,7 +350,7 @@ export default function MainApp() {
                 How can I help you today?
               </h2>
               <p className="text-sm mb-8 text-center max-w-sm" style={{ color: "var(--color-text-tertiary)" }}>
-                Upload documents and ask questions. Everything runs locally on your device.
+                {currentChatId ? "Ask questions about documents attached to this chat." : "Start a new conversation or upload a document."}
               </p>
               <div className="grid grid-cols-2 gap-2.5 w-full max-w-md">
                 {SUGGESTED_PROMPTS.map((prompt) => (
@@ -258,7 +400,7 @@ export default function MainApp() {
                         </ReactMarkdown>
                       </div>
                     ) : (
-                      <p className="text-sm whitespace-pre-wrap leading-relaxed text-white">
+                      <p className="text-sm whitespace-pre-wrap leading-relaxed">
                         {message.content}
                       </p>
                     )}
@@ -322,7 +464,7 @@ export default function MainApp() {
             onBlur={(e) => (e.currentTarget.style.borderColor = "var(--color-border-secondary)")}
           >
             <button
-              onClick={() => setShowUpload(true)}
+              onClick={() => setShowDocLibrary(true)}
               className="p-2 rounded-xl transition-colors shrink-0 cursor-pointer"
               style={{ color: "var(--color-text-muted)" }}
               onMouseEnter={(e) => (e.currentTarget.style.background = "var(--color-bg-hover)")}
@@ -338,7 +480,7 @@ export default function MainApp() {
               onChange={(e) => setInput(e.target.value)}
               onInput={handleTextareaInput}
               onKeyDown={handleKeyDown}
-              placeholder={selectedDocument ? "Ask about this document..." : "Ask about your documents..."}
+              placeholder={selectedDocumentId ? "Ask about this document..." : (documents.length > 0 ? "Ask about chat documents..." : "Ask a question...")}
               disabled={loading}
               className="flex-1 bg-transparent border-none outline-none resize-none text-sm py-2 px-1 max-h-[150px] disabled:opacity-50"
               style={{ color: "var(--color-text-primary)" }}
@@ -372,26 +514,26 @@ export default function MainApp() {
           }}
         >
           <div className="h-14 flex items-center justify-between px-4 border-b shrink-0" style={{ borderColor: "var(--color-border-primary)" }}>
-            <h3 className="text-sm font-semibold" style={{ color: "var(--color-text-primary)" }}>Documents</h3>
+            <h3 className="text-sm font-semibold" style={{ color: "var(--color-text-primary)" }}>Chat Context</h3>
             <button
-              onClick={() => setShowUpload(true)}
-              className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+              onClick={() => setShowDocLibrary(true)}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
               style={{ background: "var(--color-accent-bg)", color: "var(--color-accent-primary)" }}
             >
-              + Add
+              <PlusCircle className="w-3.5 h-3.5" /> Attach
             </button>
           </div>
 
           <div className="flex-1 overflow-y-auto p-3 space-y-1">
             <button
-              onClick={() => setSelectedDocument(null)}
+              onClick={() => setSelectedDocumentId(null)}
               className="w-full text-left px-3 py-2 rounded-lg text-sm transition-colors cursor-pointer"
               style={{
-                background: selectedDocument === null ? "var(--color-accent-bg)" : "transparent",
-                color: selectedDocument === null ? "var(--color-accent-primary)" : "var(--color-text-secondary)",
+                background: selectedDocumentId === null ? "var(--color-accent-bg)" : "transparent",
+                color: selectedDocumentId === null ? "var(--color-accent-primary)" : "var(--color-text-secondary)",
               }}
             >
-              All Documents
+              All Chat Context
             </button>
 
             {documents.map((doc) => (
@@ -399,25 +541,19 @@ export default function MainApp() {
                 key={doc.id}
                 className="group flex items-center px-3 py-2 rounded-lg text-sm transition-colors cursor-pointer"
                 style={{
-                  background: selectedDocument === doc.id ? "var(--color-accent-bg)" : "transparent",
-                  color: selectedDocument === doc.id ? "var(--color-accent-primary)" : "var(--color-text-secondary)",
+                  background: selectedDocumentId === doc.id ? "var(--color-accent-bg)" : "transparent",
+                  color: selectedDocumentId === doc.id ? "var(--color-accent-primary)" : "var(--color-text-secondary)",
                 }}
-                onClick={() => setSelectedDocument(doc.id)}
-                onMouseEnter={(e) => {
-                  if (selectedDocument !== doc.id) e.currentTarget.style.background = "var(--color-bg-hover)";
-                }}
-                onMouseLeave={(e) => {
-                  if (selectedDocument !== doc.id) e.currentTarget.style.background = "transparent";
-                }}
+                onClick={() => setSelectedDocumentId(doc.id)}
               >
                 <FileText className="w-4 h-4 mr-2 shrink-0" />
                 <span className="flex-1 truncate">{doc.filename}</span>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    deleteDocument(doc.id);
+                    removeDocFromChat(doc.id);
                   }}
-                  className="opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                  className="opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer p-1 rounded hover:bg-red-500/10"
                   style={{ color: "var(--color-error)" }}
                 >
                   <Trash2 className="w-3.5 h-3.5" />
@@ -426,9 +562,9 @@ export default function MainApp() {
             ))}
 
             {documents.length === 0 && (
-              <div className="text-center py-8">
-                <FileText className="w-8 h-8 mx-auto mb-2" style={{ color: "var(--color-text-muted)" }} />
-                <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>No documents yet</p>
+              <div className="text-center py-12 px-4 opacity-40">
+                <FileText className="w-8 h-8 mx-auto mb-2" />
+                <p className="text-xs">No documents attached to this chat yet.</p>
               </div>
             )}
           </div>
@@ -437,12 +573,79 @@ export default function MainApp() {
           <div className="p-3 border-t" style={{ borderColor: "var(--color-border-primary)" }}>
             <button
               onClick={() => setShowPodcast(true)}
-              disabled={!selectedDocument}
+              disabled={!selectedDocumentId}
               className="w-full py-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all disabled:opacity-40 cursor-pointer"
               style={{ background: "var(--color-bg-tertiary)", color: "var(--color-text-secondary)" }}
             >
               <Mic className="w-4 h-4" /> Generate Podcast
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Doc Library Modal */}
+      {showDocLibrary && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "var(--color-overlay)" }} onClick={() => setShowDocLibrary(false)}>
+          <div
+            className="w-full max-w-xl bg-elevated rounded-2xl p-6 animate-scale-in flex flex-col max-h-[80vh]"
+            style={{ background: "var(--color-bg-elevated)", boxShadow: "var(--shadow-lg)" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+             <div className="flex items-center justify-between mb-5 shrink-0">
+               <div>
+                 <h2 className="text-lg font-bold" style={{ color: "var(--color-text-primary)" }}>Document Library</h2>
+                 <p className="text-xs mt-1" style={{ color: "var(--color-text-muted)" }}>Select a document to add it to your current chat context.</p>
+               </div>
+               <div className="flex items-center gap-2">
+                 <button 
+                  onClick={() => { setShowDocLibrary(false); setShowUpload(true); }}
+                  className="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer border"
+                  style={{ borderColor: 'var(--color-border-primary)', color: 'var(--color-text-secondary)' }}
+                 >
+                   + Upload New
+                 </button>
+                 <button onClick={() => setShowDocLibrary(false)} className="p-1.5 rounded-lg transition-colors cursor-pointer" style={{ color: "var(--color-text-tertiary)" }}>
+                  <X className="w-5 h-5" />
+                </button>
+               </div>
+             </div>
+
+             <div className="flex-1 overflow-y-auto space-y-2 pr-2">
+                {allDocuments.map(doc => (
+                  <div 
+                    key={doc.id} 
+                    className="flex items-center justify-between p-3 rounded-xl border transition-all hover:border-accent-primary group"
+                    style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border-primary)' }}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-accent-bg text-accent-primary">
+                        <FileText className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium leading-none mb-1" style={{ color: 'var(--color-text-primary)' }}>{doc.filename}</p>
+                        <p className="text-[10px]" style={{ color: 'var(--color-text-muted)' }}>{doc.file_type.toUpperCase()} • {doc.chunk_count} chunks</p>
+                      </div>
+                    </div>
+                    
+                    {documents.some(d => d.id === doc.id) ? (
+                      <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded bg-green-500/10 text-green-500">Attached</span>
+                    ) : (
+                      <button 
+                        onClick={() => addDocToChat(doc.id)}
+                        className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-all hover:bg-accent-bg text-accent-primary cursor-pointer"
+                      >
+                        <PlusCircle className="w-5 h-5" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+
+                {allDocuments.length === 0 && (
+                  <div className="text-center py-12 opacity-40">
+                    <p className="text-sm">No documents found in library.</p>
+                  </div>
+                )}
+             </div>
           </div>
         </div>
       )}
@@ -461,13 +664,16 @@ export default function MainApp() {
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <DocumentUpload onComplete={() => { loadDocuments(); setShowUpload(false); }} />
+            <DocumentUpload 
+              chatId={currentChatId}
+              onComplete={() => { loadAllDocuments(); loadChatDetails(currentChatId || ""); setShowUpload(false); }} 
+            />
           </div>
         </div>
       )}
 
       {/* Podcast Modal */}
-      {showPodcast && selectedDocument && (
+      {showPodcast && selectedDocumentId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "var(--color-overlay)" }} onClick={() => setShowPodcast(false)}>
           <div
             className="w-full max-w-md rounded-2xl p-6 animate-scale-in"
@@ -481,8 +687,8 @@ export default function MainApp() {
               </button>
             </div>
             <PodcastGenerator
-              documentId={selectedDocument}
-              documentName={documents.find((d) => d.id === selectedDocument)?.filename || "Document"}
+              documentId={selectedDocumentId}
+              documentName={documents.find((d) => d.id === selectedDocumentId)?.filename || "Document"}
             />
           </div>
         </div>

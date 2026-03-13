@@ -18,6 +18,7 @@ from app.api import (
     generate_router,
     translate_router,
     system_router,
+    chats_router,
 )
 from app.core.config import settings
 from app.core.state import AppState
@@ -71,6 +72,7 @@ app.include_router(query_router, prefix="/query", tags=["Query"])
 app.include_router(generate_router, prefix="/generate", tags=["Generate"])
 app.include_router(translate_router, prefix="/translate", tags=["Translate"])
 app.include_router(system_router, prefix="/system", tags=["System"])
+app.include_router(chats_router, prefix="/chats", tags=["Chats"])
 
 
 @app.get("/")
