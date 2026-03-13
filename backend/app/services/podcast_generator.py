@@ -47,18 +47,36 @@ class LocalTTS:
         self.models_dir = settings.models_dir / "tts"
         self.male_model = self.models_dir / "en_US-lessac-medium.onnx"
         self.female_model = self.models_dir / "en_US-amy-medium.onnx"
+        self._piper_cmd = self._get_piper_cmd()
         self._piper_available = self._check_piper()
+
+    def _get_piper_cmd(self) -> str:
+        """Find the exact path to the piper executable."""
+        import shutil
+        import sys
+        
+        cmd = shutil.which("piper")
+        if cmd:
+            return cmd
+            
+        bin_dir = os.path.dirname(sys.executable)
+        cmd_venv = os.path.join(bin_dir, "piper")
+        if os.path.exists(cmd_venv):
+            return cmd_venv
+            
+        return "piper"
 
     def _check_piper(self) -> bool:
         """Check if piper is available."""
         try:
             result = subprocess.run(
-                ["piper", "--version"],
+                [self._piper_cmd, "--help"],
                 capture_output=True,
                 timeout=5,
             )
-            return result.returncode == 0
-        except (FileNotFoundError, subprocess.TimeoutExpired):
+            # Both 0 and 2 are possible based on version, but since help works, we check for 'usage:'
+            return b"usage:" in result.stdout.lower() or b"usage:" in result.stderr.lower() or result.returncode == 0
+        except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
             return False
 
     def is_available(self) -> bool:
@@ -96,7 +114,7 @@ class LocalTTS:
 
         # Build piper command
         cmd = [
-            "piper",
+            self._piper_cmd,
             "--model", str(model),
             "--config", config_file,
             "--output_file", str(output_file),
@@ -140,7 +158,8 @@ class PodcastGenerator:
         self.llm = llm_manager
         self.tts = LocalTTS()
         self.outputs_dir = settings.outputs_dir / "podcasts"
-        self.outputs_dir.mkdir(parents=True, exist_ok=True)
+        self.temp_dir = self.outputs_dir / "temp"
+        self.temp_dir.mkdir(parents=True, exist_ok=True)
 
     def is_available(self) -> bool:
         """Check if podcast generation is available."""
@@ -160,73 +179,76 @@ class PodcastGenerator:
         """
         config = config or PodcastConfig()
 
-        # Step 1: Generate outline (10%)
-        yield {"status": "generating", "progress": 5, "message": "Analyzing document..."}
-        outline = await self._generate_outline(document_content, document_title)
-
-        yield {"status": "generating", "progress": 15, "message": "Creating podcast outline..."}
-
-        # Step 2: Generate script (30%)
-        yield {"status": "generating", "progress": 20, "message": "Writing conversation script..."}
-        segments = await self._generate_script(outline, config)
-
-        yield {"status": "generating", "progress": 40, "message": f"Script ready: {len(segments)} segments"}
-
-        # Step 3: Generate audio for each segment (60%)
-        if not self.tts.is_available():
-            # Return script only if TTS not available
+        try:
+            # Step 1: Generate outline (10%)
+            yield {"status": "generating", "progress": 5, "message": "Analyzing document..."}
+            outline = await self._generate_outline(document_content, document_title)
+    
+            yield {"status": "generating", "progress": 15, "message": "Creating podcast outline..."}
+    
+            # Step 2: Generate script (30%)
+            yield {"status": "generating", "progress": 20, "message": "Writing conversation script..."}
+            segments = await self._generate_script(outline, config)
+    
+            yield {"status": "generating", "progress": 40, "message": f"Script ready: {len(segments)} segments"}
+    
+            # Step 3: Generate audio for each segment (60%)
+            if not self.tts.is_available():
+                # Return script only if TTS not available
+                yield {
+                    "status": "complete",
+                    "progress": 100,
+                    "message": "TTS not available - returning script only",
+                    "script": [{"speaker": s.speaker, "text": s.text} for s in segments],
+                    "audio_url": None,
+                }
+                return
+    
+            yield {"status": "generating", "progress": 45, "message": "Generating audio..."}
+    
+            audio_files = []
+            total_segments = len(segments)
+    
+            for i, segment in enumerate(segments):
+                progress = 45 + int((i / total_segments) * 45)
+                yield {
+                    "status": "generating",
+                    "progress": progress,
+                    "message": f"Recording segment {i + 1}/{total_segments}...",
+                }
+    
+                audio_file = await self.tts.synthesize(
+                    segment.text,
+                    voice=segment.voice,
+                    speed=config.speaking_rate,
+                )
+    
+                if audio_file:
+                    audio_files.append(audio_file)
+    
+            # Step 4: Combine audio (10%)
+            yield {"status": "generating", "progress": 92, "message": "Combining audio..."}
+    
+            output_path = await self._combine_audio(
+                audio_files,
+                document_title,
+                config,
+            )
+    
+            # Clean up temp files
+            for audio_file in audio_files:
+                audio_file.unlink(missing_ok=True)
+    
             yield {
                 "status": "complete",
                 "progress": 100,
-                "message": "TTS not available - returning script only",
+                "message": "Podcast generated successfully!",
+                "audio_url": f"/outputs/podcasts/temp/{output_path.name}",
                 "script": [{"speaker": s.speaker, "text": s.text} for s in segments],
-                "audio_url": None,
+                "duration_estimate": config.duration_minutes,
             }
-            return
-
-        yield {"status": "generating", "progress": 45, "message": "Generating audio..."}
-
-        audio_files = []
-        total_segments = len(segments)
-
-        for i, segment in enumerate(segments):
-            progress = 45 + int((i / total_segments) * 45)
-            yield {
-                "status": "generating",
-                "progress": progress,
-                "message": f"Recording segment {i + 1}/{total_segments}...",
-            }
-
-            audio_file = await self.tts.synthesize(
-                segment.text,
-                voice=segment.voice,
-                speed=config.speaking_rate,
-            )
-
-            if audio_file:
-                audio_files.append(audio_file)
-
-        # Step 4: Combine audio (10%)
-        yield {"status": "generating", "progress": 92, "message": "Combining audio..."}
-
-        output_path = await self._combine_audio(
-            audio_files,
-            document_title,
-            config,
-        )
-
-        # Clean up temp files
-        for audio_file in audio_files:
-            audio_file.unlink(missing_ok=True)
-
-        yield {
-            "status": "complete",
-            "progress": 100,
-            "message": "Podcast generated successfully!",
-            "audio_url": f"/outputs/podcasts/{output_path.name}",
-            "script": [{"speaker": s.speaker, "text": s.text} for s in segments],
-            "duration_estimate": config.duration_minutes,
-        }
+        except Exception as e:
+            yield {"status": "error", "message": f"Podcast generation failed: {str(e)}"}
 
     async def _generate_outline(
         self,
@@ -370,7 +392,7 @@ Generate the full script:"""
 
             # Generate output filename
             safe_title = "".join(c for c in title if c.isalnum() or c in " -_")[:50]
-            output_path = self.outputs_dir / f"{safe_title}_{int(time.time())}.mp3"
+            output_path = self.temp_dir / f"{safe_title}_{int(time.time())}.mp3"
 
             # Export as MP3
             combined.export(
@@ -389,7 +411,7 @@ Generate the full script:"""
         except ImportError:
             # Fallback: just return first audio file if pydub not available
             if audio_files:
-                output_path = self.outputs_dir / f"podcast_{int(time.time())}.wav"
+                output_path = self.temp_dir / f"podcast_{int(time.time())}.wav"
                 audio_files[0].rename(output_path)
                 return output_path
             raise RuntimeError("pydub not installed and no audio files generated")

@@ -6,6 +6,7 @@ from app.api.query import router as query_router
 from app.api.generate import router as generate_router
 from app.api.translate import router as translate_router
 from app.api.system import router as system_router
+from app.api.chats import router as chats_router
 
 __all__ = [
     "setup_router",
@@ -15,4 +16,5 @@ __all__ = [
     "generate_router",
     "translate_router",
     "system_router",
+    "chats_router",
 ]

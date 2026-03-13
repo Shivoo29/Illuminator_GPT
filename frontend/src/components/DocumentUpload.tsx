@@ -1,53 +1,64 @@
 import { useState, useCallback } from "react";
-import { api } from "../utils/api.ts";
+import { api } from "../utils/api";
+import {
+  Upload,
+  FileText,
+  Image,
+  Music,
+  Video,
+  X,
+  CheckCircle,
+  Loader2,
+} from "lucide-react";
 
 interface DocumentUploadProps {
   onComplete: () => void;
+  chatId?: string | null;
 }
 
-export default function DocumentUpload({ onComplete }: DocumentUploadProps) {
+const FILE_ICONS: Record<string, typeof FileText> = {
+  pdf: FileText,
+  image: Image,
+  audio: Music,
+  video: Video,
+};
+
+function getFileIcon(file: File) {
+  if (file.type.includes("pdf")) return FILE_ICONS.pdf;
+  if (file.type.includes("image")) return FILE_ICONS.image;
+  if (file.type.includes("audio")) return FILE_ICONS.audio;
+  if (file.type.includes("video")) return FILE_ICONS.video;
+  return FileText;
+}
+
+export default function DocumentUpload({ onComplete, chatId }: DocumentUploadProps) {
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
+  const [complete, setComplete] = useState(false);
 
-  const supportedTypes = [
-    ".pdf",
-    ".docx",
-    ".pptx",
-    ".txt",
-    ".md",
-    ".mp3",
-    ".wav",
-    ".mp4",
-    ".jpg",
-    ".png",
-  ];
+  const supportedTypes = [".pdf", ".docx", ".pptx", ".txt", ".md", ".mp3", ".wav", ".mp4", ".jpg", ".png"];
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (e.type === "dragenter" || e.type === "dragover") {
-      setDragActive(true);
-    } else if (e.type === "dragleave") {
-      setDragActive(false);
-    }
+    setDragActive(e.type === "dragenter" || e.type === "dragover");
   }, []);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
-
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+    if (e.dataTransfer.files?.[0]) {
       setFile(e.dataTransfer.files[0]);
       setError(null);
     }
   }, []);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
+    if (e.target.files?.[0]) {
       setFile(e.target.files[0]);
       setError(null);
     }
@@ -55,50 +66,44 @@ export default function DocumentUpload({ onComplete }: DocumentUploadProps) {
 
   const handleUpload = async () => {
     if (!file) return;
-
     setUploading(true);
     setProgress(0);
     setError(null);
 
     try {
-      // Simulate progress while uploading
-      const progressInterval = setInterval(() => {
-        setProgress((prev) => Math.min(prev + 10, 90));
-      }, 200);
-
-      await api.upload("/documents/upload", file);
-
-      clearInterval(progressInterval);
+      const interval = setInterval(() => setProgress((p) => Math.min(p + 10, 90)), 200);
+      await api.upload("/documents/upload", file, chatId ? { chat_id: chatId } : undefined);
+      clearInterval(interval);
       setProgress(100);
-
-      setTimeout(() => {
-        onComplete();
-      }, 500);
+      setComplete(true);
+      setTimeout(onComplete, 800);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed");
       setUploading(false);
     }
   };
 
-  const formatFileSize = (bytes: number): string => {
+  const formatSize = (bytes: number) => {
     if (bytes < 1024) return bytes + " B";
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
     return (bytes / (1024 * 1024)).toFixed(1) + " MB";
   };
 
+  const Icon = file ? getFileIcon(file) : Upload;
+
   return (
     <div className="space-y-4">
-      {/* Drop Zone */}
+      {/* Drop zone */}
       <div
         onDragEnter={handleDrag}
         onDragLeave={handleDrag}
         onDragOver={handleDrag}
         onDrop={handleDrop}
-        className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors ${
-          dragActive
-            ? "border-primary-500 bg-primary-50"
-            : "border-gray-300 hover:border-gray-400"
-        }`}
+        className={`border-2 border-dashed rounded-xl p-8 text-center transition-all duration-200 ${dragActive ? "scale-[1.02]" : ""}`}
+        style={{
+          borderColor: dragActive ? "var(--color-accent-primary)" : "var(--color-border-secondary)",
+          background: dragActive ? "var(--color-accent-bg)" : "var(--color-bg-tertiary)",
+        }}
       >
         <input
           type="file"
@@ -109,73 +114,71 @@ export default function DocumentUpload({ onComplete }: DocumentUploadProps) {
         />
 
         {!file ? (
-          <label htmlFor="file-upload" className="cursor-pointer">
-            <div className="text-4xl mb-2">📄</div>
-            <p className="text-gray-600 mb-2">
-              Drag and drop a file here, or click to browse
+          <label htmlFor="file-upload" className="cursor-pointer block">
+            <Upload className="w-10 h-10 mx-auto mb-3" style={{ color: "var(--color-text-muted)" }} />
+            <p className="text-sm font-medium mb-1" style={{ color: "var(--color-text-secondary)" }}>
+              Drag and drop a file, or click to browse
             </p>
-            <p className="text-sm text-gray-400">
-              Supports: PDF, DOCX, PPTX, TXT, MD, MP3, WAV, MP4, JPG, PNG
+            <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+              PDF, DOCX, PPTX, TXT, MD, MP3, WAV, MP4, JPG, PNG
             </p>
           </label>
         ) : (
           <div>
-            <div className="text-4xl mb-2">
-              {file.type.includes("pdf")
-                ? "📕"
-                : file.type.includes("image")
-                ? "🖼️"
-                : file.type.includes("audio")
-                ? "🎵"
-                : file.type.includes("video")
-                ? "🎬"
-                : "📄"}
-            </div>
-            <p className="font-medium text-gray-800">{file.name}</p>
-            <p className="text-sm text-gray-500">{formatFileSize(file.size)}</p>
-            <button
-              onClick={() => setFile(null)}
-              className="mt-2 text-sm text-red-500 hover:text-red-600"
-            >
-              Remove
-            </button>
+            <Icon className="w-10 h-10 mx-auto mb-3" style={{ color: "var(--color-accent-primary)" }} />
+            <p className="text-sm font-semibold" style={{ color: "var(--color-text-primary)" }}>{file.name}</p>
+            <p className="text-xs mt-0.5" style={{ color: "var(--color-text-tertiary)" }}>{formatSize(file.size)}</p>
+            {!uploading && (
+              <button
+                onClick={() => setFile(null)}
+                className="mt-2 text-xs font-medium cursor-pointer flex items-center gap-1 mx-auto"
+                style={{ color: "var(--color-error)" }}
+              >
+                <X className="w-3 h-3" /> Remove
+              </button>
+            )}
           </div>
         )}
       </div>
 
-      {/* Error Message */}
+      {/* Error */}
       {error && (
-        <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+        <div className="p-3 rounded-xl text-sm flex items-center gap-2" style={{ background: "var(--color-error-bg)", color: "var(--color-error)" }}>
           {error}
         </div>
       )}
 
-      {/* Progress Bar */}
+      {/* Progress */}
       {uploading && (
         <div className="space-y-2">
-          <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+          <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "var(--color-bg-tertiary)" }}>
             <div
-              className="h-full bg-primary-600 transition-all duration-300"
-              style={{ width: `${progress}%` }}
+              className="h-full rounded-full transition-all duration-300"
+              style={{ width: `${progress}%`, background: complete ? "var(--color-success)" : "linear-gradient(90deg, #6366f1, #8b5cf6)" }}
             />
           </div>
-          <p className="text-sm text-gray-600 text-center">
-            {progress < 100 ? "Processing document..." : "Complete!"}
+          <p className="text-xs text-center flex items-center justify-center gap-1.5" style={{ color: "var(--color-text-tertiary)" }}>
+            {complete ? (
+              <><CheckCircle className="w-3.5 h-3.5" style={{ color: "var(--color-success)" }} /> Complete!</>
+            ) : (
+              <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Processing document...</>
+            )}
           </p>
         </div>
       )}
 
-      {/* Upload Button */}
+      {/* Upload button */}
       <button
         onClick={handleUpload}
         disabled={!file || uploading}
-        className="w-full py-3 bg-primary-600 text-white rounded-lg font-medium hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed"
+        className="w-full py-3 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-2 transition-all hover:opacity-90 disabled:opacity-40 cursor-pointer"
+        style={{ background: "linear-gradient(135deg, #6366f1, #8b5cf6)" }}
       >
+        {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
         {uploading ? "Processing..." : "Upload & Process"}
       </button>
 
-      {/* Info */}
-      <p className="text-xs text-gray-500 text-center">
+      <p className="text-[11px] text-center" style={{ color: "var(--color-text-muted)" }}>
         Documents are processed locally and stored on your device.
       </p>
     </div>

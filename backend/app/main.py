@@ -18,6 +18,7 @@ from app.api import (
     generate_router,
     translate_router,
     system_router,
+    chats_router,
 )
 from app.core.config import settings
 from app.core.state import AppState
@@ -32,6 +33,15 @@ async def lifespan(app: FastAPI):
     # Initialize application state
     app.state.app_state = AppState()
     await app.state.app_state.initialize()
+    
+    # Cleanup temp podcasts
+    import shutil
+    temp_podcasts = Path(settings.outputs_dir) / "podcasts" / "temp"
+    if temp_podcasts.exists():
+        try:
+            shutil.rmtree(temp_podcasts)
+        except Exception as e:
+            print(f"Failed to cleanup temp podcasts: {e}")
 
     yield
 
@@ -71,6 +81,7 @@ app.include_router(query_router, prefix="/query", tags=["Query"])
 app.include_router(generate_router, prefix="/generate", tags=["Generate"])
 app.include_router(translate_router, prefix="/translate", tags=["Translate"])
 app.include_router(system_router, prefix="/system", tags=["System"])
+app.include_router(chats_router, prefix="/chats", tags=["Chats"])
 
 
 @app.get("/")

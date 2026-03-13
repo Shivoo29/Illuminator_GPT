@@ -1,5 +1,21 @@
 import { useState, useEffect } from "react";
-import { api } from "../utils/api.ts";
+import { api } from "../utils/api";
+import {
+  HardDrive,
+  Cpu,
+  MonitorCheck,
+  CircuitBoard,
+  Download,
+  Check,
+  AlertTriangle,
+  Sparkles,
+  Loader2,
+  ArrowRight,
+  Mic,
+  Palette,
+  Globe,
+  Zap,
+} from "lucide-react";
 
 interface SystemInfo {
   platform: string;
@@ -26,6 +42,8 @@ interface SetupWizardProps {
   onComplete: () => void;
 }
 
+const STEPS = ["System Check", "LLM Engine", "Model", "Features"];
+
 export default function SetupWizard({ onComplete }: SetupWizardProps) {
   const [step, setStep] = useState(1);
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
@@ -38,30 +56,29 @@ export default function SetupWizard({ onComplete }: SetupWizardProps) {
     translation: false,
   });
   const [downloading, setDownloading] = useState(false);
-  const [downloadProgress, setDownloadProgress] = useState<{
-    progress_percent: number;
-    message: string;
-    status: string;
-  }>({ progress_percent: 0, message: "", status: "" });
+  const [downloadProgress, setDownloadProgress] = useState({
+    progress_percent: 0,
+    message: "",
+    status: "",
+  });
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (step === 1) {
-      checkSystem();
-    }
+    if (step === 1) checkSystem();
   }, [step]);
 
   const checkSystem = async () => {
     try {
-      const [system, ollama, models] = await Promise.all([
+      const [system, ollama, modelsData] = await Promise.all([
         api.get<SystemInfo>("/setup/check_system"),
         api.get<{ installed: boolean; models: any[] }>("/setup/check_ollama"),
-        api.get<{ models: ModelInfo[] }>("/setup/available_models"),
+        api.get<{ models: ModelInfo[]; installed: any[]; recommended: string }>("/setup/available_models/offline"),
       ]);
       setSystemInfo(system);
       setOllamaStatus(ollama);
-      setAvailableModels(models.models);
-    } catch (err) {
+      setAvailableModels(modelsData.models || []);
+      if (modelsData.recommended) setSelectedModel(modelsData.recommended);
+    } catch {
       setError("Failed to check system requirements");
     }
   };
@@ -69,15 +86,12 @@ export default function SetupWizard({ onComplete }: SetupWizardProps) {
   const installOllama = async () => {
     setDownloading(true);
     setError(null);
-
     await api.stream("/setup/install_ollama", {}, {
-      onProgress: (data) => {
-        setDownloadProgress({
-          progress_percent: data.progress_percent || 0,
-          message: data.message || "Installing...",
-          status: data.status || "downloading",
-        });
-      },
+      onProgress: (data) => setDownloadProgress({
+        progress_percent: data.progress_percent || 0,
+        message: data.message || "Installing...",
+        status: data.status || "downloading",
+      }),
       onComplete: async () => {
         setDownloading(false);
         await checkSystem();
@@ -92,18 +106,15 @@ export default function SetupWizard({ onComplete }: SetupWizardProps) {
   const downloadModel = async () => {
     setDownloading(true);
     setError(null);
-
     await api.stream("/setup/download_model", {
       model_name: selectedModel,
       use_ollama: ollamaStatus?.installed || false,
     }, {
-      onProgress: (data) => {
-        setDownloadProgress({
-          progress_percent: data.progress_percent || 0,
-          message: data.message || "Downloading...",
-          status: data.status || "downloading",
-        });
-      },
+      onProgress: (data) => setDownloadProgress({
+        progress_percent: data.progress_percent || 0,
+        message: data.message || "Downloading...",
+        status: data.status || "downloading",
+      }),
       onComplete: () => {
         setDownloading(false);
         setStep(4);
@@ -118,206 +129,180 @@ export default function SetupWizard({ onComplete }: SetupWizardProps) {
   const completeSetup = async () => {
     setDownloading(true);
     try {
+      // Setup features to download
+      const featuresToDownload = [];
+      if (selectedFeatures.tts) featuresToDownload.push("tts");
+      if (selectedFeatures.imageGen) featuresToDownload.push("image_generation");
+      if (selectedFeatures.translation) featuresToDownload.push("translation");
+
+      // Download each feature sequentially
+      for (const feature of featuresToDownload) {
+        await new Promise<void>((resolve, reject) => {
+          api.stream("/setup/download_feature", { feature }, {
+            onProgress: (data) => setDownloadProgress({
+              progress_percent: data.progress_percent || 0,
+              message: `Downloading ${feature.replace('_', ' ')}...`,
+              status: data.status || "downloading",
+            }),
+            onComplete: () => resolve(),
+            onError: (err) => reject(err),
+          });
+        });
+      }
+
       await api.post("/setup/complete_setup", {});
       onComplete();
-    } catch (err) {
-      setError("Failed to complete setup");
+    } catch (err: any) {
+      setError(err.message || "Failed to complete setup");
       setDownloading(false);
     }
   };
 
-  const calculateTotalSize = () => {
-    let total = 0;
-    const model = availableModels.find((m) => m.name === selectedModel);
-    if (model) total += model.size_gb;
-    if (selectedFeatures.tts) total += 0.1;
-    if (selectedFeatures.imageGen) total += 2.0;
-    if (selectedFeatures.translation) total += 1.5;
-    return total.toFixed(1);
-  };
-
   return (
-    <div className="min-h-screen bg-gradient-to-br from-primary-50 to-blue-100 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-xl max-w-2xl w-full p-8">
+    <div
+      className="min-h-screen flex items-center justify-center p-6"
+      style={{ background: "var(--color-bg-primary)" }}
+    >
+      <div
+        className="w-full max-w-[560px] rounded-2xl p-8 animate-fade-in-up glass"
+        style={{ boxShadow: "var(--shadow-lg)" }}
+      >
         {/* Header */}
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">
-            Welcome to RAG Assistant
-          </h1>
-          <p className="text-gray-600">
-            Let's get your offline AI assistant set up
-          </p>
-          {/* Progress indicators */}
-          <div className="flex justify-center mt-6 space-x-2">
-            {[1, 2, 3, 4].map((s) => (
-              <div
-                key={s}
-                className={`w-3 h-3 rounded-full transition-colors ${
-                  s === step
-                    ? "bg-primary-600"
-                    : s < step
-                    ? "bg-primary-400"
-                    : "bg-gray-300"
-                }`}
-              />
-            ))}
+          <div className="w-14 h-14 rounded-2xl mx-auto mb-4 flex items-center justify-center" style={{ background: "linear-gradient(135deg, #6366f1, #8b5cf6)" }}>
+            <Sparkles className="w-7 h-7 text-white" />
           </div>
+          <h1 className="text-2xl font-bold mb-1" style={{ color: "var(--color-text-primary)" }}>
+            Welcome to Illuminator
+          </h1>
+          <p className="text-sm" style={{ color: "var(--color-text-tertiary)" }}>
+            Let's set up your offline AI assistant
+          </p>
         </div>
 
+        {/* Step Progress */}
+        <div className="flex gap-2 mb-8">
+          {STEPS.map((label, i) => (
+            <div key={label} className="flex-1">
+              <div
+                className="h-1 rounded-full transition-all duration-500"
+                style={{
+                  background: i + 1 <= step
+                    ? "linear-gradient(90deg, #6366f1, #8b5cf6)"
+                    : "var(--color-bg-tertiary)",
+                }}
+              />
+              <p className="text-[10px] mt-1.5 text-center font-medium" style={{
+                color: i + 1 === step ? "var(--color-accent-primary)" : "var(--color-text-muted)"
+              }}>
+                {label}
+              </p>
+            </div>
+          ))}
+        </div>
+
+        {/* Error */}
         {error && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
+          <div className="mb-6 p-3 rounded-xl flex items-center gap-2 text-sm" style={{ background: "var(--color-error-bg)", color: "var(--color-error)" }}>
+            <AlertTriangle className="w-4 h-4 shrink-0" />
             {error}
           </div>
         )}
 
         {/* Step 1: System Check */}
         {step === 1 && (
-          <div className="space-y-6">
-            <h2 className="text-xl font-semibold text-gray-800">
-              Step 1: System Check
-            </h2>
+          <div className="space-y-5 animate-fade-in">
+            <h2 className="text-lg font-semibold" style={{ color: "var(--color-text-primary)" }}>System Check</h2>
 
             {!systemInfo ? (
-              <div className="flex items-center justify-center py-8">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
-                <span className="ml-3 text-gray-600">Checking system...</span>
+              <div className="flex items-center justify-center py-10 gap-3" style={{ color: "var(--color-text-secondary)" }}>
+                <Loader2 className="w-5 h-5 animate-spin" />
+                <span className="text-sm">Checking system requirements...</span>
               </div>
             ) : (
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="p-4 bg-gray-50 rounded-lg">
-                    <div className="flex items-center">
-                      <span className={systemInfo.disk_free_gb > 20 ? "text-green-500" : "text-red-500"}>
-                        {systemInfo.disk_free_gb > 20 ? "✓" : "✗"}
-                      </span>
-                      <span className="ml-2 font-medium">Disk Space</span>
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    { icon: HardDrive, label: "Disk Space", value: `${systemInfo.disk_free_gb.toFixed(1)} GB free`, ok: systemInfo.disk_free_gb > 20 },
+                    { icon: CircuitBoard, label: "RAM", value: `${systemInfo.ram_gb.toFixed(1)} GB`, ok: systemInfo.ram_gb >= 8 },
+                    { icon: Cpu, label: "GPU", value: systemInfo.gpu_available ? (systemInfo.gpu_name || "Available") : "CPU mode", ok: systemInfo.gpu_available },
+                    { icon: MonitorCheck, label: "Platform", value: systemInfo.platform, ok: true },
+                  ].map((item) => (
+                    <div key={item.label} className="p-3.5 rounded-xl flex items-start gap-3" style={{ background: "var(--color-bg-tertiary)" }}>
+                      <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{
+                        background: item.ok ? "var(--color-success-bg)" : "var(--color-warning-bg)"
+                      }}>
+                        <item.icon className="w-4 h-4" style={{ color: item.ok ? "var(--color-success)" : "var(--color-warning)" }} />
+                      </div>
+                      <div>
+                        <p className="text-xs font-medium" style={{ color: "var(--color-text-tertiary)" }}>{item.label}</p>
+                        <p className="text-sm font-semibold" style={{ color: "var(--color-text-primary)" }}>{item.value}</p>
+                      </div>
                     </div>
-                    <p className="text-gray-600 mt-1">
-                      {systemInfo.disk_free_gb.toFixed(1)} GB free
-                    </p>
-                  </div>
-
-                  <div className="p-4 bg-gray-50 rounded-lg">
-                    <div className="flex items-center">
-                      <span className={systemInfo.ram_gb >= 8 ? "text-green-500" : "text-yellow-500"}>
-                        {systemInfo.ram_gb >= 8 ? "✓" : "!"}
-                      </span>
-                      <span className="ml-2 font-medium">RAM</span>
-                    </div>
-                    <p className="text-gray-600 mt-1">
-                      {systemInfo.ram_gb.toFixed(1)} GB
-                    </p>
-                  </div>
-
-                  <div className="p-4 bg-gray-50 rounded-lg">
-                    <div className="flex items-center">
-                      <span className={systemInfo.gpu_available ? "text-green-500" : "text-gray-400"}>
-                        {systemInfo.gpu_available ? "✓" : "○"}
-                      </span>
-                      <span className="ml-2 font-medium">GPU</span>
-                    </div>
-                    <p className="text-gray-600 mt-1">
-                      {systemInfo.gpu_available
-                        ? systemInfo.gpu_name || "Available"
-                        : "Not detected (CPU mode)"}
-                    </p>
-                  </div>
-
-                  <div className="p-4 bg-gray-50 rounded-lg">
-                    <div className="flex items-center">
-                      <span className="text-blue-500">i</span>
-                      <span className="ml-2 font-medium">Platform</span>
-                    </div>
-                    <p className="text-gray-600 mt-1">{systemInfo.platform}</p>
-                  </div>
+                  ))}
                 </div>
 
-                {systemInfo.sufficient ? (
-                  <button
-                    onClick={() => setStep(2)}
-                    className="w-full py-3 bg-primary-600 text-white rounded-lg font-medium hover:bg-primary-700 transition-colors"
-                  >
-                    Continue Setup →
-                  </button>
-                ) : (
-                  <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-800">
-                    Your system doesn't meet minimum requirements. You may experience issues.
-                    <button
-                      onClick={() => setStep(2)}
-                      className="mt-2 text-yellow-600 underline"
-                    >
-                      Continue anyway
-                    </button>
+                {!systemInfo.sufficient && (
+                  <div className="p-3 rounded-xl text-sm" style={{ background: "var(--color-warning-bg)", color: "var(--color-warning)" }}>
+                    System doesn't meet minimum requirements. You may experience issues.
                   </div>
                 )}
-              </div>
+
+                <button
+                  onClick={() => setStep(2)}
+                  className="w-full py-3 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-2 transition-all duration-200 hover:opacity-90 cursor-pointer"
+                  style={{ background: "linear-gradient(135deg, #6366f1, #8b5cf6)" }}
+                >
+                  Continue <ArrowRight className="w-4 h-4" />
+                </button>
+              </>
             )}
           </div>
         )}
 
-        {/* Step 2: Ollama Setup */}
+        {/* Step 2: Ollama */}
         {step === 2 && (
-          <div className="space-y-6">
-            <h2 className="text-xl font-semibold text-gray-800">
-              Step 2: LLM Engine Setup
-            </h2>
+          <div className="space-y-5 animate-fade-in">
+            <h2 className="text-lg font-semibold" style={{ color: "var(--color-text-primary)" }}>LLM Engine Setup</h2>
 
             {ollamaStatus?.installed ? (
               <div className="space-y-4">
-                <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
-                  <div className="flex items-center text-green-700">
-                    <span className="text-xl mr-2">✓</span>
-                    <span className="font-medium">Ollama is installed</span>
+                <div className="p-4 rounded-xl flex items-center gap-3" style={{ background: "var(--color-success-bg)" }}>
+                  <Check className="w-5 h-5" style={{ color: "var(--color-success)" }} />
+                  <div>
+                    <p className="text-sm font-semibold" style={{ color: "var(--color-success)" }}>Ollama is installed</p>
+                    {ollamaStatus.models.length > 0 && (
+                      <p className="text-xs mt-0.5" style={{ color: "var(--color-text-tertiary)" }}>
+                        {ollamaStatus.models.length} model(s) available
+                      </p>
+                    )}
                   </div>
-                  {ollamaStatus.models.length > 0 && (
-                    <div className="mt-2 text-green-600">
-                      {ollamaStatus.models.length} model(s) available
-                    </div>
-                  )}
                 </div>
-                <button
-                  onClick={() => setStep(3)}
-                  className="w-full py-3 bg-primary-600 text-white rounded-lg font-medium hover:bg-primary-700 transition-colors"
-                >
-                  Continue →
+                <button onClick={() => setStep(3)} className="w-full py-3 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-2 transition-all hover:opacity-90 cursor-pointer" style={{ background: "linear-gradient(135deg, #6366f1, #8b5cf6)" }}>
+                  Continue <ArrowRight className="w-4 h-4" />
                 </button>
               </div>
             ) : (
               <div className="space-y-4">
-                <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-                  <p className="text-yellow-800 mb-2">
-                    Ollama is required to run AI models locally.
-                  </p>
-                  <p className="text-yellow-700 text-sm">
-                    It's free, open-source, and keeps everything offline.
-                  </p>
+                <div className="p-4 rounded-xl" style={{ background: "var(--color-warning-bg)" }}>
+                  <p className="text-sm font-medium" style={{ color: "var(--color-warning)" }}>Ollama is required to run AI models locally.</p>
+                  <p className="text-xs mt-1" style={{ color: "var(--color-text-tertiary)" }}>Free, open-source, and keeps everything offline.</p>
                 </div>
 
                 {!downloading ? (
-                  <button
-                    onClick={installOllama}
-                    className="w-full py-3 bg-primary-600 text-white rounded-lg font-medium hover:bg-primary-700 transition-colors"
-                  >
-                    Install Ollama
+                  <button onClick={installOllama} className="w-full py-3 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-2 transition-all hover:opacity-90 cursor-pointer" style={{ background: "linear-gradient(135deg, #6366f1, #8b5cf6)" }}>
+                    <Download className="w-4 h-4" /> Install Ollama
                   </button>
                 ) : (
                   <div className="space-y-2">
-                    <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-primary-600 transition-all duration-300"
-                        style={{ width: `${downloadProgress.progress_percent}%` }}
-                      />
+                    <div className="h-2 rounded-full overflow-hidden" style={{ background: "var(--color-bg-tertiary)" }}>
+                      <div className="h-full rounded-full transition-all duration-300" style={{ width: `${downloadProgress.progress_percent}%`, background: "linear-gradient(90deg, #6366f1, #8b5cf6)" }} />
                     </div>
-                    <p className="text-sm text-gray-600 text-center">
-                      {downloadProgress.message}
-                    </p>
+                    <p className="text-xs text-center" style={{ color: "var(--color-text-tertiary)" }}>{downloadProgress.message}</p>
                   </div>
                 )}
 
-                <button
-                  onClick={() => setStep(3)}
-                  className="w-full py-2 text-gray-600 hover:text-gray-800"
-                >
+                <button onClick={() => setStep(3)} className="w-full py-2 text-sm cursor-pointer" style={{ color: "var(--color-text-muted)" }}>
                   Skip (use direct model loading)
                 </button>
               </div>
@@ -327,67 +312,48 @@ export default function SetupWizard({ onComplete }: SetupWizardProps) {
 
         {/* Step 3: Model Selection */}
         {step === 3 && (
-          <div className="space-y-6">
-            <h2 className="text-xl font-semibold text-gray-800">
-              Step 3: Select Language Model
-            </h2>
+          <div className="space-y-5 animate-fade-in">
+            <h2 className="text-lg font-semibold" style={{ color: "var(--color-text-primary)" }}>Select Language Model</h2>
 
-            <div className="space-y-3">
+            <div className="space-y-2.5 max-h-[320px] overflow-y-auto pr-1">
               {availableModels.map((model) => (
-                <label
+                <button
                   key={model.name}
-                  className={`block p-4 border-2 rounded-lg cursor-pointer transition-colors ${
-                    selectedModel === model.name
-                      ? "border-primary-500 bg-primary-50"
-                      : "border-gray-200 hover:border-gray-300"
-                  }`}
+                  onClick={() => setSelectedModel(model.name)}
+                  className="w-full text-left p-4 rounded-xl transition-all duration-200 cursor-pointer border"
+                  style={{
+                    background: selectedModel === model.name ? "var(--color-accent-bg)" : "var(--color-bg-tertiary)",
+                    borderColor: selectedModel === model.name ? "var(--color-accent-primary)" : "transparent",
+                  }}
                 >
-                  <div className="flex items-start">
-                    <input
-                      type="radio"
-                      name="model"
-                      value={model.name}
-                      checked={selectedModel === model.name}
-                      onChange={(e) => setSelectedModel(e.target.value)}
-                      className="mt-1"
-                    />
-                    <div className="ml-3 flex-1">
-                      <div className="flex items-center">
-                        <span className="font-medium">{model.display_name}</span>
-                        {model.recommended && (
-                          <span className="ml-2 px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full">
-                            Recommended
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-sm text-gray-600 mt-1">{model.description}</p>
-                      <div className="flex gap-4 mt-2 text-xs text-gray-500">
-                        <span>Size: {model.size_gb} GB</span>
-                        <span>Speed: {model.speed}</span>
-                        <span>Quality: {model.quality}</span>
-                      </div>
-                    </div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-sm font-semibold" style={{ color: "var(--color-text-primary)" }}>{model.display_name}</span>
+                    {model.recommended && (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold" style={{ background: "var(--color-success-bg)", color: "var(--color-success)" }}>
+                        RECOMMENDED
+                      </span>
+                    )}
                   </div>
-                </label>
+                  <p className="text-xs mb-2" style={{ color: "var(--color-text-tertiary)" }}>{model.description}</p>
+                  <div className="flex gap-3 text-[11px] font-medium" style={{ color: "var(--color-text-muted)" }}>
+                    <span>{model.size_gb} GB</span>
+                    <span>Speed: {model.speed}</span>
+                    <span>Quality: {model.quality}</span>
+                  </div>
+                </button>
               ))}
             </div>
 
             {!downloading ? (
-              <button
-                onClick={downloadModel}
-                className="w-full py-3 bg-primary-600 text-white rounded-lg font-medium hover:bg-primary-700 transition-colors"
-              >
-                Download & Install Model
+              <button onClick={downloadModel} className="w-full py-3 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-2 transition-all hover:opacity-90 cursor-pointer" style={{ background: "linear-gradient(135deg, #6366f1, #8b5cf6)" }}>
+                <Download className="w-4 h-4" /> Download & Install
               </button>
             ) : (
               <div className="space-y-2">
-                <div className="h-3 bg-gray-200 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-primary-600 transition-all duration-300"
-                    style={{ width: `${downloadProgress.progress_percent}%` }}
-                  />
+                <div className="h-2.5 rounded-full overflow-hidden" style={{ background: "var(--color-bg-tertiary)" }}>
+                  <div className="h-full rounded-full transition-all duration-300" style={{ width: `${downloadProgress.progress_percent}%`, background: "linear-gradient(90deg, #6366f1, #8b5cf6)" }} />
                 </div>
-                <p className="text-sm text-gray-600 text-center">
+                <p className="text-xs text-center" style={{ color: "var(--color-text-tertiary)" }}>
                   {downloadProgress.message} ({downloadProgress.progress_percent.toFixed(0)}%)
                 </p>
               </div>
@@ -395,95 +361,74 @@ export default function SetupWizard({ onComplete }: SetupWizardProps) {
           </div>
         )}
 
-        {/* Step 4: Optional Features */}
+        {/* Step 4: Features */}
         {step === 4 && (
-          <div className="space-y-6">
-            <h2 className="text-xl font-semibold text-gray-800">
-              Step 4: Optional Features
-            </h2>
-            <p className="text-gray-600">
-              Select additional features to install (you can add these later):
-            </p>
-
-            <div className="space-y-3">
-              <label className="flex items-start p-4 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50">
-                <input
-                  type="checkbox"
-                  checked={selectedFeatures.tts}
-                  onChange={(e) =>
-                    setSelectedFeatures({ ...selectedFeatures, tts: e.target.checked })
-                  }
-                  className="mt-1"
-                />
-                <div className="ml-3">
-                  <div className="font-medium">🎙️ Podcast Generation</div>
-                  <p className="text-sm text-gray-600">
-                    Generate audio discussions from documents (100 MB)
-                  </p>
-                </div>
-              </label>
-
-              <label className="flex items-start p-4 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50">
-                <input
-                  type="checkbox"
-                  checked={selectedFeatures.imageGen}
-                  onChange={(e) =>
-                    setSelectedFeatures({ ...selectedFeatures, imageGen: e.target.checked })
-                  }
-                  className="mt-1"
-                />
-                <div className="ml-3">
-                  <div className="font-medium">🎨 Image Generation</div>
-                  <p className="text-sm text-gray-600">
-                    Create images from text descriptions (2 GB)
-                  </p>
-                </div>
-              </label>
-
-              <label className="flex items-start p-4 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50">
-                <input
-                  type="checkbox"
-                  checked={selectedFeatures.translation}
-                  onChange={(e) =>
-                    setSelectedFeatures({ ...selectedFeatures, translation: e.target.checked })
-                  }
-                  className="mt-1"
-                />
-                <div className="ml-3">
-                  <div className="font-medium">🌐 Translation</div>
-                  <p className="text-sm text-gray-600">
-                    Translate between languages (1.5 GB for 5 language pairs)
-                  </p>
-                </div>
-              </label>
+          <div className="space-y-5 animate-fade-in">
+            <div>
+              <h2 className="text-lg font-semibold" style={{ color: "var(--color-text-primary)" }}>Optional Features</h2>
+              <p className="text-xs mt-1" style={{ color: "var(--color-text-tertiary)" }}>You can add these later from Settings</p>
             </div>
 
-            <div className="p-4 bg-gray-50 rounded-lg">
-              <p className="text-sm text-gray-600">
-                Total additional download: <strong>{calculateTotalSize()} GB</strong>
-              </p>
+            <div className="space-y-2.5">
+              {[
+                { key: "tts", icon: Mic, label: "Podcast Generation", desc: "Generate audio discussions from documents", size: "100 MB" },
+                { key: "imageGen", icon: Palette, label: "Image Generation", desc: "Create images from text descriptions", size: "2 GB" },
+                { key: "translation", icon: Globe, label: "Translation", desc: "Translate between languages offline", size: "1.5 GB" },
+              ].map((feature) => (
+                <button
+                  key={feature.key}
+                  onClick={() => setSelectedFeatures((prev) => ({ ...prev, [feature.key]: !prev[feature.key as keyof typeof prev] }))}
+                  className="w-full flex items-center gap-3.5 p-4 rounded-xl transition-all duration-200 cursor-pointer border text-left"
+                  style={{
+                    background: selectedFeatures[feature.key as keyof typeof selectedFeatures] ? "var(--color-accent-bg)" : "var(--color-bg-tertiary)",
+                    borderColor: selectedFeatures[feature.key as keyof typeof selectedFeatures] ? "var(--color-accent-primary)" : "transparent",
+                  }}
+                >
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{
+                    background: selectedFeatures[feature.key as keyof typeof selectedFeatures] ? "linear-gradient(135deg, #6366f1, #8b5cf6)" : "var(--color-bg-hover)"
+                  }}>
+                    <feature.icon className="w-5 h-5" style={{
+                      color: selectedFeatures[feature.key as keyof typeof selectedFeatures] ? "white" : "var(--color-text-tertiary)"
+                    }} />
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold" style={{ color: "var(--color-text-primary)" }}>{feature.label}</p>
+                    <p className="text-xs" style={{ color: "var(--color-text-tertiary)" }}>{feature.desc} · {feature.size}</p>
+                  </div>
+                  <div
+                    className="w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-all"
+                    style={{
+                      borderColor: selectedFeatures[feature.key as keyof typeof selectedFeatures] ? "var(--color-accent-primary)" : "var(--color-border-secondary)",
+                      background: selectedFeatures[feature.key as keyof typeof selectedFeatures] ? "var(--color-accent-primary)" : "transparent",
+                    }}
+                  >
+                    {selectedFeatures[feature.key as keyof typeof selectedFeatures] && <Check className="w-3 h-3 text-white" />}
+                  </div>
+                </button>
+              ))}
             </div>
 
             <button
               onClick={completeSetup}
               disabled={downloading}
-              className="w-full py-3 bg-primary-600 text-white rounded-lg font-medium hover:bg-primary-700 transition-colors disabled:opacity-50"
+              className="w-full py-3 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-2 transition-all hover:opacity-90 disabled:opacity-50 cursor-pointer"
+              style={{ background: "linear-gradient(135deg, #6366f1, #8b5cf6)" }}
             >
+              {downloading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
               {downloading ? "Setting up..." : "Complete Setup"}
             </button>
 
-            <button
-              onClick={completeSetup}
-              className="w-full py-2 text-gray-500 hover:text-gray-700"
-            >
+            <button onClick={completeSetup} className="w-full py-2 text-sm cursor-pointer" style={{ color: "var(--color-text-muted)" }}>
               Skip optional features
             </button>
           </div>
         )}
 
         {/* Footer */}
-        <div className="mt-8 text-center text-sm text-gray-500">
-          <p>100% Offline • No API Keys Required • Your Data Stays Private</p>
+        <div className="mt-8 text-center">
+          <p className="text-[11px] font-medium" style={{ color: "var(--color-text-muted)" }}>
+            100% Offline · No API Keys · Your Data Stays Private
+          </p>
         </div>
       </div>
     </div>

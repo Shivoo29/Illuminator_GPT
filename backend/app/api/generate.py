@@ -43,29 +43,6 @@ async def generate_podcast(request: Request, body: PodcastRequest):
     # Get podcast generator
     podcast_gen = await app_state.get_podcast_generator()
     
-    if not podcast_gen.is_available():
-        # Return script only if TTS not available
-        from app.services.podcast_generator import PodcastConfig
-        
-        config = PodcastConfig(
-            duration_minutes=body.duration_minutes,
-            host_a_name=body.host_a_name,
-            host_b_name=body.host_b_name,
-        )
-        
-        result = await podcast_gen.generate_script_only(
-            doc.content,
-            doc.filename,
-            config,
-        )
-        
-        return {
-            "status": "complete",
-            "message": "Script generated (TTS not available)",
-            "script": result["script"],
-            "audio_url": None,
-        }
-    
     # Stream podcast generation progress
     from app.services.podcast_generator import PodcastConfig
     
@@ -157,4 +134,30 @@ async def get_podcast_status(task_id: str):
     """Check status of podcast generation task."""
     # This would be used for async task tracking
     # For now, we use streaming responses instead
+
+@router.post("/podcast/save")
+async def save_podcast(request: Request, body: dict):
+    """Save a temporary generated podcast permanently."""
+    audio_url = body.get("audio_url")
+    if not audio_url or "/temp/" not in audio_url:
+        raise HTTPException(status_code=400, detail="Invalid temporary audio URL")
+    
+    filename = audio_url.split("/")[-1]
+    
+    from app.core.config import settings
+    from pathlib import Path
+    import shutil
+    
+    temp_path = Path(settings.outputs_dir) / "podcasts" / "temp" / filename
+    final_path = Path(settings.outputs_dir) / "podcasts" / filename
+    
+    if not temp_path.exists():
+        raise HTTPException(status_code=404, detail="Temporary audio not found or already deleted")
+        
+    try:
+        shutil.move(str(temp_path), str(final_path))
+        return {"status": "success", "audio_url": f"/outputs/podcasts/{filename}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
     return {"status": "not_implemented"}

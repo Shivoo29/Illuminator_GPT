@@ -470,8 +470,85 @@ class SetupManager:
         except Exception as e:
             yield {"status": "error", "message": f"Failed to download embedding model: {str(e)}"}
 
+    async def download_image_generation_model(self) -> AsyncGenerator[Dict[str, Any], None]:
+        """Download the image generation model (Stable Diffusion)."""
+        yield {"status": "starting", "message": "Downloading image generation model..."}
+        
+        try:
+            # Import here to avoid loading if feature isn't used
+            from diffusers import StableDiffusionPipeline
+            
+            yield {"status": "downloading", "message": "Loading Stable Diffusion (will download if needed)..."}
+            
+            # This triggers the automatic huggingface download if not cached
+            # We use a small subset to just trigger download
+            pipeline = StableDiffusionPipeline.from_pretrained(
+                settings.image_model, 
+                torch_dtype="auto",
+                safety_checker=None,
+                requires_safety_checker=False
+            )
+            
+            # Save it locally where the app expects it
+            image_dir = self.models_dir / "image_gen"
+            image_dir.mkdir(parents=True, exist_ok=True)
+            yield {"status": "downloading", "message": "Saving model to local directory..."}
+            pipeline.save_pretrained(image_dir)
+            
+            yield {"status": "complete", "message": "Image generation model ready!"}
+            
+        except Exception as e:
+            yield {"status": "error", "message": f"Failed to download image model: {str(e)}"}
+
+    async def download_translation_model(self, pair: Optional[str] = None) -> AsyncGenerator[Dict[str, Any], None]:
+        """Download a translation model (Opus MT) for a specific language pair."""
+        yield {"status": "starting", "message": "Downloading translation model..."}
+        
+        try:
+            from transformers import MarianMTModel, MarianTokenizer
+            from app.services.translator import LANGUAGE_PAIRS
+            
+            yield {"status": "downloading", "message": "Loading translation models (will download if needed)..."}
+            
+            # Default to en-hi if no pair specified
+            target_pair = pair or "en-hi"
+            source, target = target_pair.split("-")
+            
+            # Find model info
+            pair_info = next((p for p in LANGUAGE_PAIRS if p.source == source and p.target == target), None)
+            
+            if not pair_info:
+                yield {"status": "error", "message": f"Unsupported language pair: {target_pair}"}
+                return
+                
+            model_name = f"Helsinki-NLP/{pair_info.model_name}"
+            local_name = pair_info.model_name
+            
+            # Load from HF Hub
+            tokenizer = MarianTokenizer.from_pretrained(model_name)
+            model = MarianMTModel.from_pretrained(model_name)
+            
+            # Save to local directory where OfflineTranslator expects it
+            trans_dir = self.models_dir / "translation" / local_name
+            trans_dir.mkdir(parents=True, exist_ok=True)
+            
+            yield {"status": "downloading", "message": f"Saving {pair_info.display_name} model locally..."}
+            tokenizer.save_pretrained(trans_dir)
+            model.save_pretrained(trans_dir)
+            
+            yield {"status": "complete", "message": f"{pair_info.display_name} model ready!"}
+            
+        except Exception as e:
+            yield {"status": "error", "message": f"Failed to download translation model: {str(e)}"}
+
     def get_feature_status(self) -> Dict[str, Any]:
         """Get status of optional features."""
+        from app.services.translator import OfflineTranslator
+        
+        translator = OfflineTranslator()
+        pairs = translator.get_available_pairs()
+        is_any_installed = any(p["installed"] for p in pairs)
+        
         return {
             "tts": {
                 "installed": self._check_tts_installed(),
@@ -482,8 +559,9 @@ class SetupManager:
                 "size_gb": 2.0,
             },
             "translation": {
-                "installed": self._check_translation_installed(),
+                "installed": is_any_installed,
                 "size_gb": 1.5,
+                "pairs": pairs,
             },
         }
 
@@ -499,10 +577,7 @@ class SetupManager:
         image_dir = self.models_dir / "image_gen"
         return (image_dir / "model_index.json").exists()
 
-    def _check_translation_installed(self) -> bool:
-        """Check if translation models are installed."""
-        trans_dir = self.models_dir / "translation"
-        return any(trans_dir.glob("opus-mt-*"))
+
 
     def calculate_total_download_size(
         self,

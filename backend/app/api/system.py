@@ -188,6 +188,7 @@ async def reset_application(request: Request, confirm: bool = False):
     # Remove setup marker
     setup_marker = settings.data_dir / ".setup_complete"
     setup_marker.unlink(missing_ok=True)
+    request.app.state.app_state.setup_complete = False
 
     return {
         "success": True,

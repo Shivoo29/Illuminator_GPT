@@ -37,6 +37,7 @@ class RAGEngine:
         n_results: int = 5,
         filter_metadata: Optional[Dict[str, Any]] = None,
         generation_config: Optional[GenerationConfig] = None,
+        chat_history: Optional[List[Dict[str, Any]]] = None,
     ) -> RAGResult:
         """
         Answer a question using RAG.
@@ -46,6 +47,7 @@ class RAGEngine:
             n_results: Number of documents to retrieve
             filter_metadata: Optional metadata filter
             generation_config: LLM generation configuration
+            chat_history: Optional recent chat messages for context
         
         Returns:
             RAGResult with answer and sources
@@ -61,7 +63,7 @@ class RAGEngine:
         context = self._build_context(search_results)
 
         # Generate answer
-        prompt = self._build_prompt(question, context)
+        prompt = self._build_prompt(question, context, chat_history)
         answer = await self.llm.generate(prompt, generation_config)
 
         # Format sources
@@ -87,6 +89,7 @@ class RAGEngine:
         n_results: int = 5,
         filter_metadata: Optional[Dict[str, Any]] = None,
         generation_config: Optional[GenerationConfig] = None,
+        chat_history: Optional[List[Dict[str, Any]]] = None,
     ) -> AsyncGenerator[str, None]:
         """Stream the RAG response."""
         # Retrieve relevant documents
@@ -98,7 +101,7 @@ class RAGEngine:
 
         # Build context and prompt
         context = self._build_context(search_results)
-        prompt = self._build_prompt(question, context)
+        prompt = self._build_prompt(question, context, chat_history)
 
         # Stream answer
         async for chunk in self.llm.generate_stream(prompt, generation_config):
@@ -116,14 +119,21 @@ class RAGEngine:
 
         return "\n\n---\n\n".join(context_parts)
 
-    def _build_prompt(self, question: str, context: str) -> str:
+    def _build_prompt(self, question: str, context: str, chat_history: Optional[List[Dict[str, Any]]] = None) -> str:
         """Build the RAG prompt."""
+        history_str = ""
+        if chat_history:
+            history_str = "Recent Chat History:\n"
+            for msg in chat_history:
+                history_str += f"{msg.get('role', 'user').capitalize()}: {msg.get('content', '')}\n"
+            history_str += "\n"
+
         return f"""Answer the question based on the context provided. If the context doesn't contain relevant information, say so clearly.
 
 Context:
 {context}
 
-Question: {question}
+{history_str}Question: {question}
 
 Answer:"""
 

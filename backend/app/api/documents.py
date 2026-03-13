@@ -5,7 +5,7 @@ import shutil
 import tempfile
 from pathlib import Path
 from typing import List, Optional
-from fastapi import APIRouter, Request, HTTPException, UploadFile, File
+from fastapi import APIRouter, Request, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 
 router = APIRouter()
@@ -15,6 +15,7 @@ router = APIRouter()
 async def upload_document(
     request: Request,
     file: UploadFile = File(...),
+    chat_id: Optional[str] = Form(None),
 ):
     """Upload and process a document."""
     app_state = request.app.state.app_state
@@ -36,6 +37,10 @@ async def upload_document(
             file.filename,
         )
         
+        # Associate with chat if provided
+        if chat_id and hasattr(app_state, "chat_manager"):
+            app_state.chat_manager.add_document(chat_id, processed.id)
+        
         return {
             "success": True,
             "document": {
@@ -56,13 +61,23 @@ async def upload_document(
 
 
 @router.get("")
-async def list_documents(request: Request):
-    """List all uploaded documents."""
+async def list_documents(request: Request, chat_id: Optional[str] = None):
+    """List documents. If chat_id is provided, only lists docs for that chat."""
     app_state = request.app.state.app_state
     
     if not app_state.document_processor:
         raise HTTPException(status_code=503, detail="Document processor not initialized")
     
+    if chat_id and hasattr(app_state, "chat_manager"):
+        chat = app_state.chat_manager.get_chat(chat_id)
+        if not chat:
+            return []
+        
+        # Get specified docs
+        doc_ids = chat.get("document_ids", [])
+        all_docs = await app_state.document_processor.list_documents()
+        return [d for d in all_docs if d["id"] in doc_ids]
+
     documents = await app_state.document_processor.list_documents()
     return documents
 
