@@ -8,6 +8,7 @@ import Layout from "./components/Layout";
 import MainApp from "./components/MainApp";
 import TranslationPage from "./pages/TranslationPage";
 import ImageGeneratorPage from "./pages/ImageGeneratorPage";
+import PodcastPage from "./pages/PodcastPage";
 import Settings from "./pages/Settings";
 
 import { Sparkles, Loader2 } from "lucide-react";
@@ -58,6 +59,7 @@ function AppContent() {
       <Routes>
         <Route element={<Layout />}>
           <Route path="/" element={<MainApp />} />
+          <Route path="/podcast" element={<PodcastPage />} />
           <Route path="/translate" element={<TranslationPage />} />
           <Route path="/image-gen" element={<ImageGeneratorPage />} />
           <Route path="/settings" element={<Settings />} />

@@ -12,10 +12,12 @@ import {
   Moon,
   Sparkles,
   Zap,
+  Mic,
 } from "lucide-react";
 
 const navItems = [
   { to: "/", icon: MessageSquare, label: "Chat" },
+  { to: "/podcast", icon: Mic, label: "Podcast" },
   { to: "/translate", icon: Languages, label: "Translate" },
   { to: "/image-gen", icon: ImageIcon, label: "Image Gen" },
   { to: "/settings", icon: Settings, label: "Settings" },
