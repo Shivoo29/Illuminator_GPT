@@ -470,6 +470,49 @@ class SetupManager:
         except Exception as e:
             yield {"status": "error", "message": f"Failed to download embedding model: {str(e)}"}
 
+    async def download_image_generation_model(self) -> AsyncGenerator[Dict[str, Any], None]:
+        """Download the image generation model (Stable Diffusion)."""
+        yield {"status": "starting", "message": "Downloading image generation model..."}
+        
+        try:
+            # Import here to avoid loading if feature isn't used
+            from diffusers import StableDiffusionPipeline
+            
+            yield {"status": "downloading", "message": "Loading Stable Diffusion (will download if needed)..."}
+            
+            # This triggers the automatic huggingface download if not cached
+            # We use a small subset to just trigger download
+            StableDiffusionPipeline.from_pretrained(
+                settings.image_model, 
+                torch_dtype="auto",
+                safety_checker=None,
+                requires_safety_checker=False
+            )
+            
+            yield {"status": "complete", "message": "Image generation model ready!"}
+            
+        except Exception as e:
+            yield {"status": "error", "message": f"Failed to download image model: {str(e)}"}
+
+    async def download_translation_model(self) -> AsyncGenerator[Dict[str, Any], None]:
+        """Download the translation model (Opus MT)."""
+        yield {"status": "starting", "message": "Downloading translation model..."}
+        
+        try:
+            from transformers import MarianMTModel, MarianTokenizer
+            
+            yield {"status": "downloading", "message": "Loading translation models (will download if needed)..."}
+            
+            # Download common language pairs
+            model_name = "Helsinki-NLP/opus-mt-en-hi"
+            MarianTokenizer.from_pretrained(model_name)
+            MarianMTModel.from_pretrained(model_name)
+            
+            yield {"status": "complete", "message": "Translation models ready!"}
+            
+        except Exception as e:
+            yield {"status": "error", "message": f"Failed to download translation model: {str(e)}"}
+
     def get_feature_status(self) -> Dict[str, Any]:
         """Get status of optional features."""
         return {

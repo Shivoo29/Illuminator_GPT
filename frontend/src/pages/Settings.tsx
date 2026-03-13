@@ -19,6 +19,7 @@ import {
   Cpu,
   MemoryStick,
   Monitor,
+  X,
 } from "lucide-react";
 
 interface ModelInfo {
@@ -65,6 +66,17 @@ export default function Settings() {
   const [clearingCache, setClearingCache] = useState(false);
   const [resetting, setResetting] = useState(false);
 
+  // Download states
+  const [downloadingFeature, setDownloadingFeature] = useState<string | null>(null);
+  const [featureProgress, setFeatureProgress] = useState<{ message: string; percent: number } | null>(null);
+
+  const [showModelModal, setShowModelModal] = useState(false);
+  const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
+  const [selectedModel, setSelectedModel] = useState<string>("");
+  const [downloadingModel, setDownloadingModel] = useState(false);
+  const [modelProgress, setModelProgress] = useState<{ message: string; percent: number } | null>(null);
+  const [ollamaInstalled, setOllamaInstalled] = useState(false);
+
   useEffect(() => {
     loadSettings();
   }, []);
@@ -109,6 +121,69 @@ export default function Settings() {
     } catch (error) {
       console.error("Failed to reset:", error);
       setResetting(false);
+    }
+  };
+
+  const downloadFeature = async (featureKey: string) => {
+    setDownloadingFeature(featureKey);
+    setFeatureProgress({ message: "Starting...", percent: 0 });
+    try {
+      const apiKey = featureKey === 'image_generation' ? 'image_generation' : featureKey;
+      await new Promise<void>((resolve, reject) => {
+        api.stream("/setup/download_feature", { feature: apiKey }, {
+          onProgress: (data) => setFeatureProgress({
+            message: `Downloading...`,
+            percent: data.progress_percent || 0,
+          }),
+          onComplete: () => resolve(),
+          onError: (err) => reject(err),
+        });
+      });
+      await loadSettings();
+    } catch (error) {
+      console.error("Failed to download feature:", error);
+    } finally {
+      setDownloadingFeature(null);
+      setFeatureProgress(null);
+    }
+  };
+
+  const openModelModal = async () => {
+    setShowModelModal(true);
+    try {
+      const [modelsData, ollamaData] = await Promise.all([
+        api.get<{ models: ModelInfo[] }>("/setup/available_models/offline"),
+        api.get<{ installed: boolean }>("/setup/check_ollama")
+      ]);
+      setAvailableModels(modelsData.models || []);
+      setOllamaInstalled(ollamaData.installed);
+    } catch (error) {
+      console.error("Failed to load available models:", error);
+    }
+  };
+
+  const downloadModel = async () => {
+    if (!selectedModel) return;
+    setDownloadingModel(true);
+    setModelProgress({ message: "Starting...", percent: 0 });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        api.stream("/setup/download_model", { model_name: selectedModel, use_ollama: ollamaInstalled }, {
+          onProgress: (data) => setModelProgress({
+            message: data.message || "Downloading...",
+            percent: data.progress_percent || 0,
+          }),
+          onComplete: () => resolve(),
+          onError: (err) => reject(err),
+        });
+      });
+      setShowModelModal(false);
+      await loadSettings();
+    } catch (error) {
+      console.error("Failed to download model:", error);
+    } finally {
+      setDownloadingModel(false);
+      setModelProgress(null);
     }
   };
 
@@ -190,7 +265,10 @@ export default function Settings() {
                 <p className="text-sm" style={{ color: "var(--color-text-muted)" }}>No models installed</p>
               )}
             </div>
-            <button className="mt-3 text-xs font-semibold flex items-center gap-1.5 cursor-pointer" style={{ color: "var(--color-accent-primary)" }}>
+            <button
+              onClick={openModelModal}
+              className="mt-3 text-xs font-semibold flex items-center gap-1.5 cursor-pointer" style={{ color: "var(--color-accent-primary)" }}
+            >
               <Download className="w-3.5 h-3.5" /> Download New Model
             </button>
           </section>
@@ -221,15 +299,34 @@ export default function Settings() {
                       <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>{feature.size} GB</p>
                     </div>
                   </div>
-                  <span
-                    className="px-2.5 py-1 rounded-full text-[10px] font-bold"
-                    style={{
-                      background: features[feature.key]?.installed ? "var(--color-success-bg)" : "var(--color-bg-hover)",
-                      color: features[feature.key]?.installed ? "var(--color-success)" : "var(--color-text-muted)",
-                    }}
-                  >
-                    {features[feature.key]?.installed ? "INSTALLED" : "NOT INSTALLED"}
-                  </span>
+                  {features[feature.key]?.installed ? (
+                    <span
+                      className="px-2.5 py-1 rounded-full text-[10px] font-bold"
+                      style={{
+                        background: "var(--color-success-bg)",
+                        color: "var(--color-success)",
+                      }}
+                    >
+                      INSTALLED
+                    </span>
+                  ) : downloadingFeature === feature.key ? (
+                    <div className="flex items-center gap-2 w-32">
+                      <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: "var(--color-bg-hover)" }}>
+                        <div className="h-full transition-all duration-300" style={{ width: `${featureProgress?.percent || 0}%`, background: "var(--color-accent-primary)" }} />
+                      </div>
+                      <span className="text-[10px] tabular-nums" style={{ color: "var(--color-text-muted)" }}>
+                        {featureProgress?.percent.toFixed(0)}%
+                      </span>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => downloadFeature(feature.key)}
+                      className="px-3 py-1.5 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all hover:opacity-90 cursor-pointer"
+                      style={{ background: "var(--color-accent-bg)", color: "var(--color-accent-primary)" }}
+                    >
+                      <Download className="w-3 h-3" /> DOWNLOAD
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
@@ -353,6 +450,76 @@ export default function Settings() {
 
         </div>
       </div>
+
+      {/* Download Model Modal */}
+      {showModelModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-fade-in" style={{ background: "var(--color-overlay)", backdropFilter: "blur(4px)" }}>
+          <div className="w-full max-w-md rounded-2xl p-6 shadow-2xl animate-scale-in" style={{ background: "var(--color-bg-elevated)", border: "1px solid var(--color-border-primary)" }}>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold" style={{ color: "var(--color-text-primary)" }}>Download New Model</h3>
+              <button 
+                onClick={() => !downloadingModel && setShowModelModal(false)}
+                disabled={downloadingModel}
+                className="p-1 rounded-lg transition-colors cursor-pointer" style={{ color: "var(--color-text-tertiary)" }}
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="space-y-3 mb-6 max-h-[40vh] overflow-y-auto pr-2 custom-scrollbar">
+              {availableModels.length > 0 ? availableModels.map((model) => {
+                const isInstalled = models.some(m => m.name === model.name);
+                return (
+                  <button
+                    key={model.name}
+                    onClick={() => !isInstalled && !downloadingModel && setSelectedModel(model.name)}
+                    disabled={isInstalled || downloadingModel}
+                    className="w-full text-left p-3 rounded-xl transition-all border"
+                    style={{
+                      background: selectedModel === model.name ? "var(--color-accent-bg)" : "var(--color-bg-tertiary)",
+                      borderColor: selectedModel === model.name ? "var(--color-accent-primary)" : "transparent",
+                      opacity: isInstalled ? 0.5 : 1,
+                      cursor: isInstalled || downloadingModel ? "default" : "pointer"
+                    }}
+                  >
+                    <div className="flex justify-between items-center mb-1">
+                      <span className="text-sm font-semibold" style={{ color: "var(--color-text-primary)" }}>{model.name}</span>
+                      {isInstalled && <span className="text-[10px] font-bold" style={{ color: "var(--color-success)" }}>INSTALLED</span>}
+                    </div>
+                    <div className="flex gap-2 text-[10px]" style={{ color: "var(--color-text-muted)" }}>
+                      <span>{model.size_gb} GB</span>
+                    </div>
+                  </button>
+                );
+              }) : (
+                <div className="py-8 flex justify-center">
+                  <Loader2 className="w-6 h-6 animate-spin" style={{ color: "var(--color-text-muted)" }} />
+                </div>
+              )}
+            </div>
+
+            {downloadingModel ? (
+              <div className="space-y-2">
+                <div className="h-2 rounded-full overflow-hidden" style={{ background: "var(--color-bg-tertiary)" }}>
+                  <div className="h-full transition-all duration-300" style={{ width: `${modelProgress?.percent || 0}%`, background: "var(--color-accent-primary)" }} />
+                </div>
+                <p className="text-xs text-center" style={{ color: "var(--color-text-tertiary)" }}>
+                  {modelProgress?.message} ({modelProgress?.percent.toFixed(0)}%)
+                </p>
+              </div>
+            ) : (
+              <button
+                onClick={downloadModel}
+                disabled={!selectedModel || downloadingModel}
+                className="w-full py-2.5 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
+                style={{ background: "linear-gradient(135deg, #6366f1, #8b5cf6)" }}
+              >
+                <Download className="w-4 h-4" /> Download
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

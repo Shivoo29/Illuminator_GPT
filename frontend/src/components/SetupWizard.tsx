@@ -129,10 +129,31 @@ export default function SetupWizard({ onComplete }: SetupWizardProps) {
   const completeSetup = async () => {
     setDownloading(true);
     try {
+      // Setup features to download
+      const featuresToDownload = [];
+      if (selectedFeatures.tts) featuresToDownload.push("tts");
+      if (selectedFeatures.imageGen) featuresToDownload.push("image_generation");
+      if (selectedFeatures.translation) featuresToDownload.push("translation");
+
+      // Download each feature sequentially
+      for (const feature of featuresToDownload) {
+        await new Promise<void>((resolve, reject) => {
+          api.stream("/setup/download_feature", { feature }, {
+            onProgress: (data) => setDownloadProgress({
+              progress_percent: data.progress_percent || 0,
+              message: `Downloading ${feature.replace('_', ' ')}...`,
+              status: data.status || "downloading",
+            }),
+            onComplete: () => resolve(),
+            onError: (err) => reject(err),
+          });
+        });
+      }
+
       await api.post("/setup/complete_setup", {});
       onComplete();
-    } catch {
-      setError("Failed to complete setup");
+    } catch (err: any) {
+      setError(err.message || "Failed to complete setup");
       setDownloading(false);
     }
   };

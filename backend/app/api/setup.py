@@ -172,6 +172,12 @@ async def download_feature(request: FeatureDownloadRequest):
             elif request.feature == "embedding":
                 async for progress in manager.download_embedding_model():
                     yield json.dumps(progress) + "\n"
+            elif request.feature == "image_generation":
+                async for progress in manager.download_image_generation_model():
+                    yield json.dumps(progress) + "\n"
+            elif request.feature == "translation":
+                async for progress in manager.download_translation_model():
+                    yield json.dumps(progress) + "\n"
             else:
                 yield json.dumps({"status": "error", "message": f"Unknown feature: {request.feature}"}) + "\n"
         finally:
