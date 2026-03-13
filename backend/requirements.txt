@@ -26,6 +26,10 @@ faster-whisper
 moviepy
 pydub
 
+# Local TTS
+piper-tts
+pathvalidate
+
 #OCR
 pytesseract
 easyocr

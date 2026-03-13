@@ -152,6 +152,7 @@ class ApiClient {
 
       const decoder = new TextDecoder()
       let buffer = ""
+      let completed = false
 
       while (true) {
         const { done, value } = await reader.read()
@@ -166,8 +167,10 @@ class ApiClient {
               try {
                 const data = JSON.parse(line)
                 if (data.status === "complete") {
+                  completed = true
                   callbacks.onComplete(data)
                 } else if (data.status === "error") {
+                  completed = true
                   callbacks.onError(new Error(data.message || "Stream error"))
                 } else {
                   callbacks.onProgress(data)
@@ -184,8 +187,10 @@ class ApiClient {
             try {
               const data = JSON.parse(buffer.trim())
               if (data.status === "complete") {
+                completed = true
                 callbacks.onComplete(data)
               } else if (data.status === "error") {
+                completed = true
                 callbacks.onError(new Error(data.message || "Stream error"))
               } else {
                 callbacks.onProgress(data)
@@ -193,6 +198,11 @@ class ApiClient {
             } catch (e) {
               console.warn("Failed to parse final stream data:", buffer)
             }
+          }
+          if (!completed) {
+            callbacks.onError(
+              new Error("Stream closed unexpectedly before completion"),
+            )
           }
           break
         }

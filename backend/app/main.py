@@ -33,6 +33,15 @@ async def lifespan(app: FastAPI):
     # Initialize application state
     app.state.app_state = AppState()
     await app.state.app_state.initialize()
+    
+    # Cleanup temp podcasts
+    import shutil
+    temp_podcasts = Path(settings.outputs_dir) / "podcasts" / "temp"
+    if temp_podcasts.exists():
+        try:
+            shutil.rmtree(temp_podcasts)
+        except Exception as e:
+            print(f"Failed to cleanup temp podcasts: {e}")
 
     yield
 
