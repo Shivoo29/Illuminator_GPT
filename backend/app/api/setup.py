@@ -23,6 +23,7 @@ class ModelDownloadRequest(BaseModel):
 class FeatureDownloadRequest(BaseModel):
     """Request model for downloading optional features."""
     feature: str  # 'tts', 'image_generation', 'translation'
+    pair: Optional[str] = None  # Only used for translation
 
 
 @router.get("/check_system")
@@ -176,7 +177,7 @@ async def download_feature(request: FeatureDownloadRequest):
                 async for progress in manager.download_image_generation_model():
                     yield json.dumps(progress) + "\n"
             elif request.feature == "translation":
-                async for progress in manager.download_translation_model():
+                async for progress in manager.download_translation_model(request.pair):
                     yield json.dumps(progress) + "\n"
             else:
                 yield json.dumps({"status": "error", "message": f"Unknown feature: {request.feature}"}) + "\n"

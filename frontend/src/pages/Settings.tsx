@@ -29,9 +29,19 @@ interface ModelInfo {
   type: string;
 }
 
+interface LanguagePair {
+  source: string;
+  target: string;
+  display_name: string;
+  model_name: string;
+  size_mb: number;
+  installed: boolean;
+}
+
 interface FeatureStatus {
   installed: boolean;
   size_gb: number;
+  pairs?: LanguagePair[];
 }
 
 interface StorageInfo {
@@ -124,13 +134,14 @@ export default function Settings() {
     }
   };
 
-  const downloadFeature = async (featureKey: string) => {
-    setDownloadingFeature(featureKey);
+  const downloadFeature = async (featureKey: string, pair?: string) => {
+    const downloadKey = pair ? `${featureKey}-${pair}` : featureKey;
+    setDownloadingFeature(downloadKey);
     setFeatureProgress({ message: "Starting...", percent: 0 });
     try {
       const apiKey = featureKey === 'image_generation' ? 'image_generation' : featureKey;
       await new Promise<void>((resolve, reject) => {
-        api.stream("/setup/download_feature", { feature: apiKey }, {
+        api.stream("/setup/download_feature", { feature: apiKey, pair: pair }, {
           onProgress: (data) => setFeatureProgress({
             message: `Downloading...`,
             percent: data.progress_percent || 0,
@@ -331,6 +342,54 @@ export default function Settings() {
               ))}
             </div>
           </section>
+
+          {/* Language Pairs */}
+          {features.translation?.pairs && (
+            <section className="rounded-xl border p-5" style={{ borderColor: "var(--color-border-primary)", background: "var(--color-bg-surface)" }}>
+              <div className="flex items-center gap-2 mb-4">
+                <Globe className="w-4 h-4" style={{ color: "var(--color-accent-primary)" }} />
+                <h3 className="text-sm font-semibold" style={{ color: "var(--color-text-primary)" }}>Language Pairs</h3>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {features.translation.pairs.map((pair) => (
+                  <div key={pair.model_name} className="flex items-center justify-between p-3.5 rounded-xl border" style={{ borderColor: "var(--color-border-primary)", background: "var(--color-bg-tertiary)" }}>
+                    <div>
+                      <p className="text-sm font-medium" style={{ color: "var(--color-text-primary)" }}>{pair.display_name}</p>
+                      <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>{pair.size_mb} MB</p>
+                    </div>
+                    {pair.installed ? (
+                      <span
+                        className="px-2.5 py-1 rounded-full text-[10px] font-bold"
+                        style={{
+                          background: "var(--color-success-bg)",
+                          color: "var(--color-success)",
+                        }}
+                      >
+                        INSTALLED
+                      </span>
+                    ) : downloadingFeature === `translation-${pair.source}-${pair.target}` ? (
+                      <div className="flex items-center gap-2 w-24">
+                        <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: "var(--color-bg-hover)" }}>
+                          <div className="h-full transition-all duration-300" style={{ width: `${featureProgress?.percent || 0}%`, background: "var(--color-accent-primary)" }} />
+                        </div>
+                        <span className="text-[10px] tabular-nums" style={{ color: "var(--color-text-muted)" }}>
+                          {featureProgress?.percent.toFixed(0)}%
+                        </span>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => downloadFeature('translation', `${pair.source}-${pair.target}`)}
+                        className="px-3 py-1.5 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all hover:opacity-90 cursor-pointer"
+                        style={{ background: "var(--color-accent-bg)", color: "var(--color-accent-primary)" }}
+                      >
+                        <Download className="w-3 h-3" /> DOWNLOAD
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
 
           {/* Storage */}
           {storage && (

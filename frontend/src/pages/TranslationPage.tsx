@@ -39,12 +39,12 @@ export default function TranslationPage() {
     setError(null);
 
     try {
-      const result = await api.post<{ translated_text: string; success: boolean }>("/translate", {
+      const result = await api.post<{ translated: string; success: boolean }>("/translate", {
         text: sourceText,
         source_lang: sourceLang,
         target_lang: targetLang,
       });
-      setTranslatedText(result.translated_text);
+      setTranslatedText(result.translated);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Translation failed");
     } finally {
